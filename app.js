@@ -1,0 +1,1348 @@
+import { STEP_SECONDS, WORLD_WIDTH, SUMMIT_Y, cloneGameState, createGameState, stepGameState } from "./game-core.js";
+import {
+  CHARACTER_ROSTER,
+  buildPlayerConfig,
+  getCharacterById,
+  getCharacterWithSkin,
+  getFallbackCharacter,
+  getSkinVariants,
+} from "./roster.js";
+
+const canvas = document.getElementById("gameCanvas");
+const context = canvas.getContext("2d");
+
+const titleScreen = document.getElementById("titleScreen");
+const setupScreen = document.getElementById("setupScreen");
+const gamePanel = document.getElementById("gamePanel");
+
+const playButton = document.getElementById("playButton");
+const backButton = document.getElementById("backButton");
+const offlineButton = document.getElementById("offlineButton");
+const createRoomButton = document.getElementById("createRoomButton");
+const joinRoomButton = document.getElementById("joinRoomButton");
+const installButton = document.getElementById("installButton");
+const leaveMatchButton = document.getElementById("leaveMatchButton");
+const menuButton = document.getElementById("menuButton");
+const resumeButton = document.getElementById("resumeButton");
+const controlsSelect = document.getElementById("controlsSelect");
+
+const downloadNote = document.getElementById("downloadNote");
+const playerNameInput = document.getElementById("playerName");
+const roomCodeInput = document.getElementById("roomCode");
+const networkBadge = document.getElementById("networkBadge");
+const statusText = document.getElementById("statusText");
+const phaseText = document.getElementById("phaseText");
+const eventText = document.getElementById("eventText");
+const roomText = document.getElementById("roomText");
+
+const rosterGrid = document.getElementById("rosterGrid");
+const selectedPortrait = document.getElementById("selectedPortrait");
+const selectedName = document.getElementById("selectedName");
+const selectedTitle = document.getElementById("selectedTitle");
+const selectedDescription = document.getElementById("selectedDescription");
+const selectedHint = document.getElementById("selectedHint");
+const skinSelector = document.getElementById("skinSelector");
+const playerSlotTabs = document.getElementById("playerSlotTabs");
+const playerCountGrid = document.getElementById("playerCountGrid");
+const deviceLaptop = document.getElementById("deviceLaptop");
+const deviceMobile = document.getElementById("deviceMobile");
+const offlinePreview = document.getElementById("offlinePreview");
+const keyboardLegend = document.getElementById("keyboardLegend");
+const mobileControls = document.getElementById("mobileControls");
+const joystickTemplate = document.getElementById("joystickTemplate");
+const menuPopover = document.getElementById("menuPopover");
+const controlsPanel = document.getElementById("controlsPanel");
+
+const offlineKeyboardBindings = [
+  { id: "p1", title: "Player 1", color: "#ff946d", label: "A D W S F", keys: ["KeyA", "KeyD", "KeyW", "KeyS", "KeyF"] },
+  { id: "p2", title: "Player 2", color: "#67c9ff", label: "J L I K H", keys: ["KeyJ", "KeyL", "KeyI", "KeyK", "KeyH"] },
+  { id: "p3", title: "Player 3", color: "#86f0a8", label: "Left Right Up Down /", keys: ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Slash"] },
+  { id: "p4", title: "Player 4", color: "#ffd56d", label: "4 6 8 5 0", keys: ["Numpad4", "Numpad6", "Numpad8", "Numpad5", "Numpad0"] },
+];
+
+const onlineKeyboardBinding = {
+  id: "local",
+  title: "Online",
+  color: "#ff946d",
+  label: "A D W S F",
+  keys: ["KeyA", "KeyD", "KeyW", "KeyS", "KeyF"],
+};
+
+const skinLabels = {
+  default: "Default",
+  shadow: "Shadow",
+  neon: "Neon",
+  camo: "Camo",
+};
+
+const app = {
+  screen: "title",
+  mode: null,
+  paused: false,
+  playerCount: 2,
+  deviceMode: "laptop",
+  activeLocalSlot: 0,
+  selectedCharacterId: CHARACTER_ROSTER[0].id,
+  selectedSkinId: "default",
+  localSetup: createInitialLocalSetup(),
+  state: null,
+  cameraY: 0,
+  roomCode: "Local",
+  socket: null,
+  socketReady: null,
+  selfId: null,
+  installPrompt: null,
+  lastFrame: performance.now(),
+  accumulator: 0,
+  networkReady: navigator.onLine,
+  localInputs: {},
+  pendingPresses: {},
+  lastOnlineSend: 0,
+};
+
+init();
+
+function init() {
+  syncSelectionFromActiveSlot();
+  renderRoster();
+  renderSlotTabs();
+  renderSkinSelector();
+  renderPlayerCountButtons();
+  renderSelectedCharacter();
+  renderOfflinePreview();
+  updateDeviceButtons();
+  buildControlDisplays();
+  updateNetworkBadge();
+  updateScreen();
+  setupEvents();
+  drawMenuCanvas();
+  requestAnimationFrame(frame);
+  registerOfflineSupport();
+}
+
+function setupEvents() {
+  playButton.addEventListener("click", () => {
+    app.screen = "setup";
+    updateScreen();
+    statusText.textContent = "Choose the number of players, device style, and skin before starting.";
+  });
+
+  backButton.addEventListener("click", () => {
+    app.screen = "title";
+    updateScreen();
+    statusText.textContent = "Press Play to choose players and controls.";
+  });
+
+  offlineButton.addEventListener("click", startOfflineMatch);
+  createRoomButton.addEventListener("click", createOnlineRoom);
+  joinRoomButton.addEventListener("click", joinOnlineRoom);
+  installButton.addEventListener("click", installGame);
+  leaveMatchButton.addEventListener("click", leaveMatch);
+  menuButton.addEventListener("click", () => setPaused(!app.paused));
+  resumeButton.addEventListener("click", () => setPaused(false));
+  controlsSelect.addEventListener("change", renderControlsPanel);
+
+  deviceLaptop.addEventListener("click", () => {
+    app.deviceMode = "laptop";
+    updateDeviceButtons();
+    buildControlDisplays();
+    renderOfflinePreview();
+  });
+
+  deviceMobile.addEventListener("click", () => {
+    app.deviceMode = "mobile";
+    updateDeviceButtons();
+    buildControlDisplays();
+    renderOfflinePreview();
+  });
+
+  window.addEventListener("keydown", handleKeyChange(true));
+  window.addEventListener("keyup", handleKeyChange(false));
+  window.addEventListener("online", () => {
+    app.networkReady = true;
+    updateNetworkBadge();
+  });
+  window.addEventListener("offline", () => {
+    app.networkReady = false;
+    updateNetworkBadge();
+  });
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    app.installPrompt = event;
+    installButton.classList.remove("hidden");
+    downloadNote.textContent = "Install is ready. Add the game to your device.";
+  });
+  window.addEventListener("appinstalled", () => {
+    app.installPrompt = null;
+    installButton.classList.add("hidden");
+    downloadNote.textContent = "The game is installed on this device.";
+  });
+}
+
+function updateScreen() {
+  titleScreen.classList.toggle("hidden", app.screen !== "title");
+  setupScreen.classList.toggle("hidden", app.screen !== "setup");
+  gamePanel.classList.toggle("hidden", app.screen !== "game");
+}
+
+function renderRoster() {
+  rosterGrid.innerHTML = "";
+  for (const character of CHARACTER_ROSTER) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `roster-card${character.id === app.selectedCharacterId ? " active" : ""}`;
+    button.innerHTML = `
+      <div class="roster-art">${characterPortraitSvg(getCharacterWithSkin(character.id, app.selectedSkinId), "small")}</div>
+      <div class="roster-copy">
+        <strong>${escapeHtml(character.name)}</strong>
+        <span>${escapeHtml(character.title)}</span>
+      </div>
+    `;
+    button.addEventListener("click", () => {
+      app.selectedCharacterId = character.id;
+      app.localSetup[app.activeLocalSlot].characterId = character.id;
+      renderRoster();
+      renderSkinSelector();
+      renderSelectedCharacter();
+      renderOfflinePreview();
+    });
+    rosterGrid.appendChild(button);
+  }
+}
+
+function renderSkinSelector() {
+  skinSelector.innerHTML = "";
+  for (const skinId of getSkinVariants()) {
+    const preview = getCharacterWithSkin(app.selectedCharacterId, skinId);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `skin-btn${skinId === app.selectedSkinId ? " active" : ""}`;
+    button.title = skinLabels[skinId] || skinId;
+    button.style.background = preview.look.body;
+    button.addEventListener("click", () => {
+      app.selectedSkinId = skinId;
+      app.localSetup[app.activeLocalSlot].skinId = skinId;
+      renderSkinSelector();
+      renderRoster();
+      renderSelectedCharacter();
+      renderOfflinePreview();
+    });
+    skinSelector.appendChild(button);
+  }
+}
+
+function renderSlotTabs() {
+  playerSlotTabs.innerHTML = "";
+  for (let index = 0; index < 4; index += 1) {
+    const slot = app.localSetup[index];
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `slot-tab${index === app.activeLocalSlot ? " active" : ""}`;
+    button.textContent = `P${index + 1}`;
+    button.disabled = index >= app.playerCount;
+    button.addEventListener("click", () => {
+      app.activeLocalSlot = index;
+      syncSelectionFromActiveSlot();
+      renderSlotTabs();
+      renderRoster();
+      renderSkinSelector();
+      renderSelectedCharacter();
+    });
+    playerSlotTabs.appendChild(button);
+  }
+}
+
+function renderPlayerCountButtons() {
+  playerCountGrid.innerHTML = "";
+  for (let count = 2; count <= 4; count += 1) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `count-btn${count === app.playerCount ? " active" : ""}`;
+    button.textContent = String(count);
+    button.addEventListener("click", () => {
+      app.playerCount = count;
+      if (app.activeLocalSlot >= count) {
+        app.activeLocalSlot = count - 1;
+      }
+      syncSelectionFromActiveSlot();
+      renderPlayerCountButtons();
+      renderSlotTabs();
+      renderRoster();
+      renderSkinSelector();
+      renderSelectedCharacter();
+      renderOfflinePreview();
+    });
+    playerCountGrid.appendChild(button);
+  }
+}
+
+function updateDeviceButtons() {
+  deviceLaptop.classList.toggle("active", app.deviceMode === "laptop");
+  deviceMobile.classList.toggle("active", app.deviceMode === "mobile");
+}
+
+function renderSelectedCharacter() {
+  const character = getCharacterWithSkin(app.selectedCharacterId, app.selectedSkinId);
+  selectedPortrait.innerHTML = characterPortraitSvg(character, "large");
+  selectedName.textContent = character.name;
+  selectedTitle.textContent = `${character.title} / ${skinLabels[app.selectedSkinId] || app.selectedSkinId}`;
+  selectedDescription.textContent = character.description;
+  selectedHint.textContent = `Player ${app.activeLocalSlot + 1} will use ${character.name} with ${app.deviceMode === "mobile" ? "joystick" : "button"} controls.`;
+}
+
+function renderOfflinePreview() {
+  offlinePreview.innerHTML = "";
+  const previewPlayers = createOfflinePlayers();
+  previewPlayers.forEach((player, index) => {
+    const card = document.createElement("article");
+    card.className = "slot-card";
+    const controlsText =
+      app.deviceMode === "mobile"
+        ? "Joystick + Shoot"
+        : offlineKeyboardBindings[index].label;
+    card.innerHTML = `
+      <div class="slot-number">P${index + 1}</div>
+      <div class="slot-art">${characterPortraitSvg({ ...getCharacterById(player.characterId), look: player.look }, "slot")}</div>
+      <div class="slot-copy">
+        <strong>${escapeHtml(player.name)}</strong>
+        <span>${escapeHtml(controlsText)}</span>
+      </div>
+    `;
+    offlinePreview.appendChild(card);
+  });
+}
+
+function createOfflinePlayers() {
+  const players = [];
+  for (let index = 0; index < app.playerCount; index += 1) {
+    const slot = app.localSetup[index];
+    players.push(
+      buildPlayerConfig(slot.characterId, {
+        id: `p${index + 1}`,
+        name: slot.name,
+        skinId: slot.skinId,
+        spawnIndex: index,
+      }),
+    );
+  }
+
+  return players;
+}
+
+function buildControlDisplays() {
+  keyboardLegend.innerHTML = "";
+
+  if (app.deviceMode === "laptop") {
+    const bindings = app.mode === "online" ? [onlineKeyboardBinding] : offlineKeyboardBindings.slice(0, app.playerCount);
+    bindings.forEach((binding) => {
+      const card = document.createElement("article");
+      card.className = "legend-card";
+      card.innerHTML = `
+        <h3 style="color:${binding.color}">${binding.title}</h3>
+        <p>${binding.label}</p>
+        <p>Left, Right, Jump, Drop, Shoot</p>
+      `;
+      keyboardLegend.appendChild(card);
+    });
+  }
+
+  const playersForPads =
+    app.mode === "offline"
+      ? createOfflinePlayers()
+      : app.mode === "online"
+        ? [{ id: "local", name: "You" }]
+        : [];
+  buildMobileControls(app.deviceMode === "mobile" ? playersForPads : []);
+  renderControlsPanel();
+}
+
+function renderControlsPanel() {
+  controlsPanel.innerHTML = "";
+  const showAll = controlsSelect.value === "all";
+
+  if (app.deviceMode === "mobile") {
+    addControlRow("Move", "Joystick");
+    addControlRow("Jump", "Push joystick up");
+    addControlRow("Shoot / Punch", "Red button");
+    if (showAll && app.mode === "offline") {
+      addControlRow("Offline pads", `${app.playerCount} local joystick pads`);
+    }
+    return;
+  }
+
+  if (app.mode === "online") {
+    addControlRow("Move", "A / D");
+    addControlRow("Jump", "W");
+    addControlRow("Drop", "S");
+    addControlRow("Shoot / Punch", "F");
+    return;
+  }
+
+  offlineKeyboardBindings.slice(0, showAll ? app.playerCount : Math.min(1, app.playerCount)).forEach((binding) => {
+    addControlRow(binding.title, binding.label);
+  });
+}
+
+function addControlRow(label, value) {
+  const row = document.createElement("div");
+  row.className = "controls-row";
+  row.innerHTML = `<strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span>`;
+  controlsPanel.appendChild(row);
+}
+
+function startOfflineMatch() {
+  const players = createOfflinePlayers();
+  app.mode = "offline";
+  app.screen = "game";
+  app.state = createGameState("offline", players);
+  app.roomCode = "Offline";
+  app.selfId = "p1";
+  app.cameraY = 0;
+  app.paused = false;
+  app.accumulator = 0;
+  app.localInputs = Object.fromEntries(players.map((player) => [player.id, emptyInput()]));
+  app.pendingPresses = Object.fromEntries(players.map((player) => [player.id, { up: false, attack: false }]));
+  phaseText.textContent = "Climb";
+  eventText.textContent = "Match started";
+  roomText.textContent = "Offline";
+  updateScreen();
+  setPaused(false);
+  buildControlDisplays();
+  statusText.textContent = `Offline match started with ${players.length} player${players.length === 1 ? "" : "s"}.`;
+}
+
+function createOnlineRoom() {
+  if (!navigator.onLine) {
+    statusText.textContent = "Online mode needs internet or Wi-Fi.";
+    return;
+  }
+
+  connectSocket()
+    .then(() => {
+      const name = playerNameInput.value.trim() || "Player 1";
+      app.socket.send(
+        JSON.stringify({
+          type: "create-room",
+          name,
+          characterId: app.localSetup[0].characterId,
+          skinId: app.localSetup[0].skinId,
+          capacity: Math.max(2, app.playerCount),
+        }),
+      );
+      statusText.textContent = "Creating room...";
+    })
+    .catch(() => {
+      statusText.textContent = "The online room could not be created.";
+    });
+}
+
+function joinOnlineRoom() {
+  if (!navigator.onLine) {
+    statusText.textContent = "Online mode needs internet or Wi-Fi.";
+    return;
+  }
+
+  connectSocket()
+    .then(() => {
+      const name = playerNameInput.value.trim() || "Player";
+      const code = roomCodeInput.value.trim().toUpperCase();
+      app.socket.send(
+        JSON.stringify({
+          type: "join-room",
+          code,
+          name,
+          characterId: app.localSetup[0].characterId,
+          skinId: app.localSetup[0].skinId,
+        }),
+      );
+      statusText.textContent = `Joining room ${code || "...."}...`;
+    })
+    .catch(() => {
+      statusText.textContent = "The online room could not be joined.";
+    });
+}
+
+function connectSocket() {
+  if (app.socket?.readyState === WebSocket.OPEN) {
+    return Promise.resolve();
+  }
+
+  if (app.socket?.readyState === WebSocket.CONNECTING && app.socketReady) {
+    return app.socketReady;
+  }
+
+  app.mode = "online";
+  app.localInputs = { local: emptyInput() };
+  app.pendingPresses = { local: { up: false, attack: false } };
+
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  app.socket = new WebSocket(`${protocol}://${location.host}/ws`);
+  app.socketReady = new Promise((resolve, reject) => {
+    app.socket.addEventListener("open", resolve, { once: true });
+    app.socket.addEventListener("error", reject, { once: true });
+  });
+
+  app.socket.addEventListener("message", (event) => {
+    handleSocketMessage(JSON.parse(event.data));
+  });
+
+  app.socket.addEventListener("close", () => {
+    app.socketReady = null;
+    if (app.mode === "online" && app.screen === "game") {
+      statusText.textContent = "The online connection closed.";
+    }
+  });
+
+  return app.socketReady;
+}
+
+function handleSocketMessage(message) {
+  switch (message.type) {
+    case "room-created":
+      app.roomCode = message.code;
+      roomText.textContent = message.code;
+      statusText.textContent = `Room ${message.code} created. Share the code with other players.`;
+      break;
+    case "room-joined":
+      app.roomCode = message.code;
+      roomText.textContent = message.code;
+      statusText.textContent = `Joined room ${message.code}. Waiting for the rest of the players.`;
+      break;
+    case "room-status":
+      roomText.textContent = message.code;
+      statusText.textContent = `Room ${message.code}: ${message.players.length} joined, ${message.waitingFor} waiting.`;
+      break;
+    case "match-started":
+      app.state = message.state;
+      app.selfId = message.selfId;
+      app.screen = "game";
+      app.cameraY = 0;
+      updateScreen();
+      setPaused(false);
+      buildControlDisplays();
+      statusText.textContent = "Online match started.";
+      break;
+    case "state":
+      app.state = cloneGameState(message.state);
+      app.selfId = message.selfId;
+      if (app.state.phase === "finished") {
+        statusText.textContent = `${app.state.winnerName} wins the round.`;
+      }
+      break;
+    case "error":
+      statusText.textContent = message.message;
+      break;
+    default:
+      break;
+  }
+}
+
+function leaveMatch() {
+  if (app.socket) {
+    try {
+      app.socket.close();
+    } catch (error) {}
+  }
+
+  app.mode = null;
+  app.state = null;
+  app.selfId = null;
+  app.roomCode = "Local";
+  app.socket = null;
+  app.socketReady = null;
+  app.localInputs = {};
+  app.pendingPresses = {};
+  app.screen = "setup";
+  app.paused = false;
+  updateScreen();
+  setPaused(false);
+  buildControlDisplays();
+  statusText.textContent = "Back in setup. Change the player count, controls, or skin and start again.";
+}
+
+function setPaused(shouldPause) {
+  app.paused = shouldPause;
+  menuPopover.classList.toggle("hidden", !shouldPause);
+  if (!shouldPause) {
+    controlsSelect.value = "current";
+    renderControlsPanel();
+  }
+}
+
+function handleKeyChange(isDown) {
+  return (event) => {
+    if (!app.mode || app.deviceMode !== "laptop") {
+      return;
+    }
+
+    if (event.code === "Escape" && isDown && app.screen === "game") {
+      setPaused(!app.paused);
+      return;
+    }
+
+    if (app.paused) {
+      return;
+    }
+
+    if (app.mode === "offline") {
+      offlineKeyboardBindings.slice(0, app.playerCount).forEach((binding) => {
+        applyBindingInput(binding.id, binding.keys, event.code, isDown);
+      });
+      return;
+    }
+
+    applyBindingInput("local", onlineKeyboardBinding.keys, event.code, isDown);
+  };
+}
+
+function applyBindingInput(inputId, keys, code, isDown) {
+  const mapping = {
+    [keys[0]]: "left",
+    [keys[1]]: "right",
+    [keys[2]]: "up",
+    [keys[3]]: "down",
+    [keys[4]]: "attack",
+  };
+  const action = mapping[code];
+  if (!action) {
+    return;
+  }
+
+  const input = app.localInputs[inputId];
+  const pending = app.pendingPresses[inputId];
+  if (!input || !pending) {
+    return;
+  }
+
+  if (isDown && !input[action]) {
+    if (action === "up") {
+      pending.up = true;
+    }
+    if (action === "attack") {
+      pending.attack = true;
+    }
+  }
+
+  input[action] = isDown;
+}
+
+function buildMobileControls(players) {
+  mobileControls.innerHTML = "";
+  if (players.length === 0) {
+    mobileControls.classList.add("hidden");
+    return;
+  }
+
+  mobileControls.classList.remove("hidden");
+
+  players.forEach((player) => {
+    const fragment = joystickTemplate.content.cloneNode(true);
+    const title = fragment.querySelector(".pad-title");
+    const zone = fragment.querySelector(".stick-zone");
+    const thumb = fragment.querySelector(".stick-thumb");
+    const attackButton = fragment.querySelector(".attack-button");
+    const inputId = app.mode === "online" ? "local" : player.id;
+    let dragging = false;
+
+    title.textContent = app.mode === "online" ? "Your joystick" : `${player.name}`;
+
+    const resetMovement = () => {
+      thumb.style.transform = "translate(0px, 0px)";
+      const input = app.localInputs[inputId];
+      if (!input) {
+        return;
+      }
+      input.left = false;
+      input.right = false;
+      input.up = false;
+      input.down = false;
+    };
+
+    const setInputFromPointer = (event) => {
+      const rect = zone.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const dx = event.clientX - centerX;
+      const dy = event.clientY - centerY;
+      const max = rect.width / 2 - 18;
+      const distance = Math.min(max, Math.hypot(dx, dy) || 0);
+      const angle = Math.atan2(dy, dx);
+      const clampedX = Math.cos(angle) * distance;
+      const clampedY = Math.sin(angle) * distance;
+      thumb.style.transform = `translate(${clampedX}px, ${clampedY}px)`;
+
+      const input = app.localInputs[inputId];
+      const pending = app.pendingPresses[inputId];
+      if (!input || !pending) {
+        return;
+      }
+
+      const nextUp = clampedY < -18;
+      if (nextUp && !input.up) {
+        pending.up = true;
+      }
+
+      input.left = clampedX < -18;
+      input.right = clampedX > 18;
+      input.up = nextUp;
+      input.down = clampedY > 18;
+    };
+
+    zone.addEventListener("pointerdown", (event) => {
+      if (app.paused) {
+        return;
+      }
+      dragging = true;
+      zone.setPointerCapture(event.pointerId);
+      setInputFromPointer(event);
+    });
+
+    zone.addEventListener("pointermove", (event) => {
+      if (dragging && !app.paused) {
+        setInputFromPointer(event);
+      }
+    });
+
+    zone.addEventListener("pointerup", () => {
+      dragging = false;
+      resetMovement();
+    });
+    zone.addEventListener("pointercancel", () => {
+      dragging = false;
+      resetMovement();
+    });
+
+    attackButton.addEventListener("pointerdown", () => {
+      if (app.paused) {
+        return;
+      }
+      const input = app.localInputs[inputId];
+      const pending = app.pendingPresses[inputId];
+      if (!input || !pending) {
+        return;
+      }
+      input.attack = true;
+      pending.attack = true;
+    });
+    attackButton.addEventListener("pointerup", () => {
+      const input = app.localInputs[inputId];
+      if (input) {
+        input.attack = false;
+      }
+    });
+    attackButton.addEventListener("pointercancel", () => {
+      const input = app.localInputs[inputId];
+      if (input) {
+        input.attack = false;
+      }
+    });
+
+    mobileControls.appendChild(fragment);
+  });
+}
+
+function frame(now) {
+  const deltaSeconds = Math.min(0.05, (now - app.lastFrame) / 1000);
+  app.lastFrame = now;
+
+  if (!app.paused) {
+    if (app.mode === "offline" && app.state) {
+      app.accumulator += deltaSeconds;
+      while (app.accumulator >= STEP_SECONDS) {
+        app.state = stepGameState(app.state, composeOfflineInputs(), STEP_SECONDS);
+        app.accumulator -= STEP_SECONDS;
+        resetPendingPresses();
+      }
+    } else if (app.mode === "online" && app.socket?.readyState === WebSocket.OPEN && app.screen === "game") {
+      app.lastOnlineSend += deltaSeconds;
+      if (app.lastOnlineSend >= STEP_SECONDS) {
+        sendOnlineInput();
+        app.lastOnlineSend = 0;
+        resetPendingPresses();
+      }
+    }
+  }
+
+  if (app.screen === "game") {
+    renderGame();
+  } else {
+    drawMenuCanvas();
+  }
+
+  requestAnimationFrame(frame);
+}
+
+function composeOfflineInputs() {
+  const inputs = {};
+  Object.keys(app.localInputs).forEach((id) => {
+    inputs[id] = {
+      ...app.localInputs[id],
+      upPressed: app.pendingPresses[id].up,
+      attackPressed: app.pendingPresses[id].attack,
+    };
+  });
+  return inputs;
+}
+
+function sendOnlineInput() {
+  const local = app.localInputs.local;
+  if (!local || !app.socket) {
+    return;
+  }
+
+  app.socket.send(
+    JSON.stringify({
+      type: "input",
+      input: {
+        ...local,
+        upPressed: app.pendingPresses.local.up,
+        attackPressed: app.pendingPresses.local.attack,
+      },
+    }),
+  );
+}
+
+function resetPendingPresses() {
+  Object.values(app.pendingPresses).forEach((entry) => {
+    entry.up = false;
+    entry.attack = false;
+  });
+}
+
+function renderGame() {
+  context.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!app.state) {
+    drawWaitingScene();
+    return;
+  }
+
+  const state = app.state;
+  const livingPlayers = state.players.filter((player) => !player.eliminated);
+  const focusY = livingPlayers.length > 0 ? Math.min(...livingPlayers.map((player) => player.y)) : 0;
+  const targetCamera = Math.min(state.safeLevelY - 320, focusY - 220);
+  app.cameraY += (targetCamera - app.cameraY) * 0.08;
+
+  drawGameBackground(state);
+  drawPlatforms(state);
+  drawItems(state);
+  drawWeapons(state);
+  drawProjectiles(state);
+  drawPlayers(state);
+  drawSummitGlow();
+  drawHudOverlay(state);
+  drawLiftCountdown(state);
+  drawLevelTransition(state);
+  drawPauseCurtain();
+
+  phaseText.textContent = formatPhase(state.phase);
+  eventText.textContent = state.eventText;
+  roomText.textContent = app.roomCode;
+}
+
+function drawMenuCanvas() {
+  const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, "#2d3f57");
+  gradient.addColorStop(1, "#111826");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let index = 0; index < 14; index += 1) {
+    context.fillStyle = `rgba(255,255,255,${0.03 + (index % 2) * 0.02})`;
+    context.fillRect(40 + index * 65, 60 + (index % 5) * 62, 30, 30);
+  }
+
+  context.fillStyle = "#f8f9ff";
+  context.font = "700 42px Impact, sans-serif";
+  context.fillText("Sky Scramble Showdown", 68, 150);
+  context.font = "18px Trebuchet MS, sans-serif";
+  context.fillStyle = "#c3d2e5";
+  context.fillText("Choose your player count, mobile or laptop controls, and your skin.", 68, 190);
+
+  CHARACTER_ROSTER.slice(0, 4).forEach((character, index) => {
+    drawPosterCharacter(getCharacterWithSkin(character.id, getSkinVariants()[index % getSkinVariants().length]), 140 + index * 185, 470, 1.25);
+  });
+}
+
+function drawWaitingScene() {
+  context.fillStyle = "#121926";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#f8f9ff";
+  context.font = "700 32px Impact, sans-serif";
+  context.fillText("Waiting for players...", 82, 160);
+  context.font = "18px Trebuchet MS, sans-serif";
+  context.fillStyle = "#c3d2e5";
+  context.fillText(statusText.textContent, 82, 198);
+  drawPosterCharacter(getCharacterWithSkin(app.localSetup[0].characterId, app.localSetup[0].skinId), 420, 470, 1.55);
+}
+
+function drawGameBackground(state) {
+  const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, "#465f83");
+  gradient.addColorStop(1, "#111826");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let index = 0; index < 10; index += 1) {
+    const y = ((index * 140 - app.cameraY * 0.22) % 760) - 60;
+    context.fillStyle = "rgba(255,255,255,0.05)";
+    context.fillRect(70 + index * 110, y, 50 + (index % 3) * 20, 22 + (index % 2) * 12);
+  }
+
+  const lineY = worldToScreenY(state.safeLevelY + 30);
+  context.fillStyle = "rgba(255, 120, 120, 0.35)";
+  for (let x = 0; x < canvas.width; x += 28) {
+    context.fillRect(x, lineY, 16, 4);
+  }
+
+  if (state.currentLevel === 1) {
+    context.fillStyle = "rgba(22, 32, 47, 0.9)";
+    context.fillRect(0, worldToScreenY(830), 36, 180);
+    context.fillRect(canvas.width - 36, worldToScreenY(830), 36, 180);
+    context.fillStyle = "rgba(255,255,255,0.08)";
+    context.fillRect(6, worldToScreenY(840), 24, 160);
+    context.fillRect(canvas.width - 30, worldToScreenY(840), 24, 160);
+  }
+}
+
+function drawPlatforms(state) {
+  const colliders = [...state.platforms];
+  if (state.liftEvent) {
+    colliders.push({
+      x: state.liftEvent.x,
+      y: state.liftEvent.currentY ?? state.liftEvent.targetY,
+      w: state.liftEvent.w,
+      h: state.liftEvent.h,
+      isLift: true,
+    });
+  }
+
+  colliders.forEach((platform) => {
+    const x = worldToScreenX(platform.x);
+    const y = worldToScreenY(platform.y);
+    const width = platform.w * screenScaleX();
+    const height = platform.h || 18;
+    const fill = platform.isLift
+      ? ["#f9d471", "#d88e2a"]
+      : platform.isBreakable
+        ? ["#8a6b49", "#5f452c"]
+        : platform.isMoving
+          ? ["#8adfff", "#4d88c0"]
+          : ["#bfd8ff", "#7497c7"];
+
+    const pixels = Math.max(4, Math.floor(width / 12));
+    const cell = width / pixels;
+    for (let i = 0; i < pixels; i += 1) {
+      context.fillStyle = fill[i % 2];
+      context.fillRect(x + i * cell, y, cell + 1, height);
+    }
+
+    context.fillStyle = "rgba(255,255,255,0.18)";
+    context.fillRect(x + 4, y + 3, Math.max(20, width - 8), 3);
+
+    if (platform.isBreakable && platform.maxHp && platform.hp < platform.maxHp) {
+      context.strokeStyle = "rgba(0,0,0,0.65)";
+      context.lineWidth = 2;
+      context.beginPath();
+      context.moveTo(x + 10, y + 4);
+      context.lineTo(x + width - 12, y + height - 4);
+      context.moveTo(x + width * 0.55, y + 2);
+      context.lineTo(x + width * 0.4, y + height - 2);
+      context.stroke();
+    }
+
+    if (platform.isMoving) {
+      context.fillStyle = "rgba(255,255,255,0.3)";
+      context.fillRect(x + width - 14, y - 8, 10, 5);
+    }
+  });
+}
+
+function drawItems(state) {
+  if (!state.items) {
+    return;
+  }
+
+  state.items.forEach((item) => {
+    const x = worldToScreenX(item.x);
+    const y = worldToScreenY(item.y);
+    if (item.type === "xp") {
+      context.fillStyle = "#f8c953";
+      context.fillRect(x + 6, y, 8, 8);
+      context.fillRect(x, y + 6, 8, 8);
+      context.fillRect(x + 12, y + 6, 8, 8);
+      context.fillRect(x + 6, y + 12, 8, 8);
+    } else if (item.type === "heart") {
+      context.fillStyle = "#ff8d8d";
+      context.fillRect(x + 2, y + 4, 6, 6);
+      context.fillRect(x + 10, y + 4, 6, 6);
+      context.fillRect(x + 4, y + 10, 10, 8);
+    } else {
+      context.fillStyle = "#f5d06d";
+      context.fillRect(x, y + 5, 18, 5);
+      context.fillStyle = "#d86565";
+      context.fillRect(x + 6, y, 6, 5);
+    }
+  });
+}
+
+function drawWeapons(state) {
+  state.weapons.forEach((weapon) => {
+    if (weapon.claimedBy) {
+      return;
+    }
+    const x = worldToScreenX(weapon.x);
+    const bob = Math.sin((state.elapsed + x) * 4) * 2;
+    const y = worldToScreenY(weapon.y) + bob;
+    if (weapon.kind === "sword") {
+      context.fillStyle = "#d5ecff";
+      context.fillRect(x + 11, y - 6, 4, 18);
+      context.fillStyle = "#6f7d92";
+      context.fillRect(x + 7, y + 10, 12, 4);
+      context.fillStyle = "#d86f6f";
+      context.fillRect(x + 10, y + 13, 6, 5);
+    } else if (weapon.kind === "sniper") {
+      context.fillStyle = "#697d94";
+      context.fillRect(x, y + 5, 28, 5);
+      context.fillStyle = "#d5ecff";
+      context.fillRect(x + 22, y + 6, 8, 2);
+      context.fillStyle = "#c86767";
+      context.fillRect(x + 4, y + 1, 10, 4);
+    } else {
+      context.fillStyle = "#5c6f82";
+      context.fillRect(x, y + 5, 22, 6);
+      context.fillStyle = "#f06a6a";
+      context.fillRect(x + 7, y, 7, 5);
+      context.fillStyle = "#d5ecff";
+      context.fillRect(x + 18, y + 6, 5, 2);
+    }
+  });
+}
+
+function drawProjectiles(state) {
+  if (!state.projectiles) {
+    return;
+  }
+
+  state.projectiles.forEach((projectile) => {
+    const x = worldToScreenX(projectile.x);
+    const y = worldToScreenY(projectile.y);
+    context.fillStyle = projectile.color || "#ffe89b";
+    context.fillRect(x - 10, y + 1, 10, 2);
+    context.fillStyle = "#fff7d0";
+    context.fillRect(x, y - 1, projectile.kind === "sniper" ? 9 : 7, projectile.kind === "sniper" ? 6 : 5);
+  });
+}
+
+function drawPlayers(state) {
+  state.players.forEach((player) => {
+    if (player.eliminated) {
+      return;
+    }
+
+    if (player.respawnTimer > 0) {
+      context.globalAlpha = 0.5;
+    } else if (player.invulnerability > 0) {
+      context.globalAlpha = 0.75;
+    }
+
+    const x = worldToScreenX(player.x);
+    const walkPhase = Math.sin(state.elapsed * 11 + player.x * 0.03) * Math.min(1, Math.abs(player.vx) / 180);
+    const bob = player.onGround ? Math.abs(walkPhase) * 2 : 0;
+    const y = worldToScreenY(player.y) - bob;
+    const look = player.look || getFallbackCharacter().look;
+    const centerX = x + player.w / 2;
+    const lean = Math.max(-5, Math.min(5, player.vx * 0.012)) + (player.recoilTimer > 0 ? -player.facing * 2.4 : 0);
+    const attackStretch = player.attackAnimation > 0 ? 1 + Math.min(0.18, player.attackAnimation * 0.6) : 1;
+    const hurtFlash = player.hurtTimer > 0;
+
+    context.fillStyle = "rgba(0,0,0,0.18)";
+    context.fillRect(x + 8, y + player.h + 3, 26, 5);
+
+    if (player.weapon) {
+      const aimLength = 40;
+      const endX = centerX + Math.cos(player.aimAngle || (player.facing === 1 ? 0 : Math.PI)) * aimLength;
+      const endY = y + 24 + Math.sin(player.aimAngle || 0) * aimLength;
+      context.strokeStyle = "rgba(255, 239, 155, 0.45)";
+      context.lineWidth = 2;
+      context.beginPath();
+      context.moveTo(centerX, y + 24);
+      context.lineTo(endX, endY);
+      context.stroke();
+    }
+
+    context.save();
+    if (player.flipAngle) {
+      context.translate(centerX, y + player.h * 0.48);
+      context.rotate(player.flipAngle * 0.18);
+      context.translate(-centerX, -(y + player.h * 0.48));
+    }
+
+    context.fillStyle = hurtFlash ? "#ffffff" : look.scarf;
+    context.fillRect(centerX - 9, y + 18, 20 + player.facing * lean * 0.2, 8);
+    context.fillStyle = hurtFlash ? "#ffffff" : look.trim;
+    context.fillRect(centerX - 12 + lean * 0.3, y + 12, 24, 18);
+    context.fillStyle = hurtFlash ? "#ffffff" : look.body;
+    context.fillRect(centerX - 16 + lean * 0.2, y + 18, 32 * attackStretch, 28);
+    context.fillStyle = hurtFlash ? "#ffffff" : look.accent;
+    context.fillRect(centerX - 12, y + 22, 24, 8);
+    context.fillStyle = hurtFlash ? "#ffffff" : look.trim;
+    context.fillRect(centerX - 20, y + 18 + walkPhase * 2, 7, 19);
+    context.fillRect(centerX + 13, y + 18 - walkPhase * 2, 7, 19);
+    context.fillStyle = hurtFlash ? "#ffffff" : look.outline;
+    context.fillRect(centerX - 11, y + 46 + walkPhase * 2, 8, 15);
+    context.fillRect(centerX + 3, y + 46 - walkPhase * 2, 8, 15);
+    context.fillStyle = hurtFlash ? "#ffffff" : look.body;
+    context.fillRect(centerX - 14, y + 0, 28, 18);
+    context.fillStyle = look.visor;
+    context.fillRect(centerX - 11, y + 6, 22, 6);
+
+    if (player.weaponType === "sword") {
+      const swordX = centerX + (player.facing === 1 ? 11 : -18);
+      context.fillStyle = "#d7ecff";
+      context.fillRect(swordX, y + 16, 4, 20);
+      context.fillStyle = "#6f7d92";
+      context.fillRect(swordX - 4, y + 33, 12, 4);
+      if (player.attackKind === "sword" && player.attackAnimation > 0) {
+        context.strokeStyle = "rgba(215,236,255,0.85)";
+        context.lineWidth = 4;
+        context.beginPath();
+        context.arc(centerX + player.facing * 18, y + 24, 22, player.facing === 1 ? -0.9 : 2.1, player.facing === 1 ? 0.8 : 4.0);
+        context.stroke();
+      }
+    } else if (player.weapon) {
+      const gunX = centerX + (player.facing === 1 ? 12 : -32);
+      const gunWidth = player.weaponType === "sniper" ? 28 : 20;
+      context.fillStyle = player.weaponType === "sniper" ? "#697d94" : "#5c6f82";
+      context.fillRect(gunX, y + 25, gunWidth, 5);
+      context.fillStyle = "#f06a6a";
+      context.fillRect(gunX + 6, y + 19, 7, 6);
+      if (player.muzzleFlashTimer > 0) {
+        context.fillStyle = "rgba(255,240,176,0.9)";
+        const flashX = gunX + (player.facing === 1 ? gunWidth : -8);
+        context.fillRect(flashX, y + 23, 8, 8);
+      }
+    }
+
+    context.restore();
+
+    context.fillStyle = "#ffffff";
+    context.font = "11px Trebuchet MS, sans-serif";
+    context.fillText(player.name, x - 2, y - 8);
+    context.fillStyle = "rgba(0,0,0,0.45)";
+    context.fillRect(x, y - 18, 44, 5);
+    context.fillStyle = "#8ff0b6";
+    context.fillRect(x, y - 18, 44 * (player.health / 100), 5);
+    context.fillStyle = "#ffffff";
+    context.fillText(`L${player.lives}`, x + 48, y - 12);
+
+    context.globalAlpha = 1;
+  });
+}
+
+function drawSummitGlow() {
+  const summitY = worldToScreenY(SUMMIT_Y + 40);
+  const gradient = context.createLinearGradient(0, summitY - 60, 0, summitY + 60);
+  gradient.addColorStop(0, "rgba(248, 201, 83, 0)");
+  gradient.addColorStop(0.5, "rgba(248, 201, 83, 0.2)");
+  gradient.addColorStop(1, "rgba(248, 201, 83, 0)");
+  context.fillStyle = gradient;
+  context.fillRect(0, summitY - 60, canvas.width, 120);
+}
+
+function drawHudOverlay(state) {
+  context.fillStyle = "rgba(17, 24, 38, 0.8)";
+  context.fillRect(18, 18, 430, 84);
+  context.strokeStyle = "rgba(255,255,255,0.12)";
+  context.strokeRect(18, 18, 430, 84);
+  context.fillStyle = "#f8f9ff";
+  context.font = "700 21px Impact, sans-serif";
+  context.fillText(formatPhase(state.phase), 34, 46);
+  context.font = "15px Trebuchet MS, sans-serif";
+  context.fillStyle = "#d0dcea";
+  context.fillText(state.eventText, 34, 70);
+  context.fillText(state.message, 34, 92);
+
+  if (state.phase === "finished") {
+    context.fillStyle = "rgba(10, 14, 23, 0.88)";
+    context.fillRect(220, 220, 520, 150);
+    context.strokeStyle = "rgba(255,255,255,0.12)";
+    context.strokeRect(220, 220, 520, 150);
+    context.fillStyle = "#f8f9ff";
+    context.font = "700 36px Impact, sans-serif";
+    context.fillText(`${state.winnerName} wins!`, 360, 286);
+    context.font = "18px Trebuchet MS, sans-serif";
+    context.fillStyle = "#d0dcea";
+    context.fillText("Use the menu to review controls or go back to setup.", 282, 325);
+  }
+}
+
+function drawLiftCountdown(state) {
+  if (!state.liftEvent || state.liftEvent.phase !== "countdown") {
+    return;
+  }
+
+  const countdown = Math.max(0, Math.ceil(state.liftEvent.countdown));
+  context.fillStyle = "rgba(10, 14, 23, 0.24)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#f8c953";
+  context.font = "700 92px Impact, sans-serif";
+  context.fillText(String(countdown), canvas.width / 2 - 26, canvas.height / 2);
+  context.font = "20px Trebuchet MS, sans-serif";
+  context.fillStyle = "#ffffff";
+  context.fillText("Get on the lift before zero.", canvas.width / 2 - 100, canvas.height / 2 + 34);
+}
+
+function drawLevelTransition(state) {
+  if (!state.levelTransition?.active) {
+    return;
+  }
+
+  const progress = 1 - Math.max(0, state.levelTransition.timer / 2);
+  const alpha = progress < 0.5 ? progress * 1.6 : (1 - progress) * 1.6;
+  context.fillStyle = `rgba(6, 8, 12, ${Math.max(0.2, Math.min(0.9, alpha))})`;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#f8f9ff";
+  context.font = "700 44px Impact, sans-serif";
+  context.fillText(`Level ${state.levelTransition.nextLevel}`, canvas.width / 2 - 90, canvas.height / 2 - 10);
+  context.font = "18px Trebuchet MS, sans-serif";
+  context.fillStyle = "#d0dcea";
+  context.fillText("The tower shifts into a new arena...", canvas.width / 2 - 140, canvas.height / 2 + 24);
+}
+
+function drawPauseCurtain() {
+  if (!app.paused) {
+    return;
+  }
+
+  context.fillStyle = "rgba(10, 14, 23, 0.35)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawPosterCharacter(character, x, y, scale) {
+  const look = character.look;
+  const width = 54 * scale;
+  const height = 84 * scale;
+  const top = y - height;
+  context.save();
+  context.translate(x, top);
+  context.fillStyle = look.scarf;
+  context.fillRect(width * 0.24, height * 0.23, width * 0.34, height * 0.1);
+  context.fillStyle = look.trim;
+  context.fillRect(width * 0.28, height * 0.16, width * 0.44, height * 0.22);
+  context.fillStyle = look.body;
+  context.fillRect(width * 0.18, height * 0.22, width * 0.64, height * 0.38);
+  context.fillStyle = look.accent;
+  context.fillRect(width * 0.26, height * 0.29, width * 0.48, height * 0.08);
+  context.fillStyle = look.outline;
+  context.fillRect(width * 0.28, height * 0.6, width * 0.14, height * 0.24);
+  context.fillRect(width * 0.58, height * 0.6, width * 0.14, height * 0.24);
+  context.fillStyle = look.body;
+  context.fillRect(width * 0.24, 0, width * 0.52, height * 0.18);
+  context.fillStyle = look.visor;
+  context.fillRect(width * 0.3, height * 0.06, width * 0.4, height * 0.06);
+  context.restore();
+}
+
+function characterPortraitSvg(character, size) {
+  const look = character.look;
+  const dimensions = size === "large" ? 190 : size === "slot" ? 94 : 112;
+  return `
+    <svg viewBox="0 0 120 140" width="${dimensions}" height="${Math.round(dimensions * 1.18)}" aria-hidden="true">
+      <rect x="8" y="10" width="104" height="120" fill="rgba(255,255,255,0.04)"></rect>
+      <rect x="36" y="48" width="28" height="10" fill="${look.scarf}"></rect>
+      <rect x="38" y="34" width="44" height="36" fill="${look.body}"></rect>
+      <rect x="46" y="14" width="28" height="24" fill="${look.body}"></rect>
+      <rect x="49" y="22" width="22" height="8" fill="${look.visor}"></rect>
+      <rect x="44" y="42" width="32" height="10" fill="${look.accent}"></rect>
+      <rect x="32" y="40" width="10" height="30" fill="${look.trim}"></rect>
+      <rect x="78" y="40" width="10" height="30" fill="${look.trim}"></rect>
+      <rect x="42" y="72" width="11" height="32" fill="${look.outline}"></rect>
+      <rect x="67" y="72" width="11" height="32" fill="${look.outline}"></rect>
+      <rect x="38" y="104" width="17" height="7" fill="${look.trim}"></rect>
+      <rect x="65" y="104" width="17" height="7" fill="${look.trim}"></rect>
+    </svg>
+  `;
+}
+
+function worldToScreenX(x) {
+  return x * screenScaleX();
+}
+
+function worldToScreenY(y) {
+  return y - app.cameraY;
+}
+
+function screenScaleX() {
+  return canvas.width / WORLD_WIDTH;
+}
+
+function emptyInput() {
+  return {
+    left: false,
+    right: false,
+    up: false,
+    down: false,
+    attack: false,
+  };
+}
+
+function formatPhase(phase) {
+  if (phase === "climb") {
+    return "Climb Phase";
+  }
+  if (phase === "showdown") {
+    return "Showdown";
+  }
+  if (phase === "finished") {
+    return "Round Over";
+  }
+  return "Waiting";
+}
+
+function updateNetworkBadge() {
+  networkBadge.textContent = navigator.onLine ? "Internet ready" : "Offline right now";
+}
+
+async function installGame() {
+  if (app.installPrompt) {
+    await app.installPrompt.prompt();
+    app.installPrompt = null;
+    installButton.classList.add("hidden");
+    return;
+  }
+  downloadNote.textContent = "Use your browser install or add-to-home-screen option if the prompt is not available yet.";
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+async function registerOfflineSupport() {
+  if ("serviceWorker" in navigator) {
+    try {
+      await navigator.serviceWorker.register("/sw.js");
+    } catch (error) {
+      statusText.textContent = "Offline caching could not be enabled in this browser.";
+    }
+  }
+}
+
+function createInitialLocalSetup() {
+  const variants = getSkinVariants();
+  return [0, 1, 2, 3].map((index) => ({
+    characterId: CHARACTER_ROSTER[index % CHARACTER_ROSTER.length].id,
+    skinId: variants[index % variants.length],
+    name: `Player ${index + 1}`,
+  }));
+}
+
+function syncSelectionFromActiveSlot() {
+  const slot = app.localSetup[app.activeLocalSlot];
+  app.selectedCharacterId = slot.characterId;
+  app.selectedSkinId = slot.skinId;
+}

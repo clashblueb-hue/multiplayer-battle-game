@@ -1,0 +1,25 @@
+{
+  "name": "Sky Scramble Showdown",
+  "short_name": "SkyScramble",
+  "description": "A climbing brawler with offline local play, online rooms, and installable PWA support.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#08111d",
+  "theme_color": "#10213b",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

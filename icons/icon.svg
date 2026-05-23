@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#274a79"/>
+      <stop offset="100%" stop-color="#09111d"/>
+    </linearGradient>
+    <linearGradient id="tower" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#86c7ff"/>
+      <stop offset="100%" stop-color="#436ea9"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+  <circle cx="256" cy="124" r="78" fill="#ffcf70" opacity="0.2"/>
+  <path d="M122 424 L202 168 H310 L390 424 Z" fill="url(#tower)"/>
+  <rect x="198" y="134" width="116" height="28" rx="14" fill="#ffe48f"/>
+  <path d="M226 190 L296 198 L242 226 Z" fill="#ff6570"/>
+  <rect x="226" y="174" width="58" height="74" rx="18" fill="#ff946d"/>
+  <rect x="236" y="148" width="40" height="32" rx="12" fill="#ff946d"/>
+  <rect x="239" y="158" width="34" height="10" rx="5" fill="#fff4cf"/>
+  <rect x="234" y="252" width="14" height="82" rx="7" fill="#5b4522"/>
+  <rect x="264" y="252" width="14" height="82" rx="7" fill="#5b4522"/>
+</svg>
