@@ -1,14 +1,17 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#121926" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
     <title>Sky Scramble Showdown</title>
-    <link rel="manifest" href="/site.webmanifest" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="manifest" href="site.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="shell">
@@ -17,12 +20,21 @@
           <p class="eyebrow">Pixel Summit Brawler</p>
           <h1>Sky Scramble Showdown</h1>
           <p class="hero-text">
-            Climb through shifting arena floors, knock rivals off the tower, grab falling blasters,
-            and survive the lift countdown before the screen fades into the next level.
+            Climb through shifting arena floors, knock rivals off the tower,
+            grab falling blasters, and survive the lift countdown before the
+            screen fades into the next level.
           </p>
           <div class="title-actions">
-            <button class="primary-button" id="playButton" type="button">Play</button>
-            <button class="secondary-button hidden" id="installButton" type="button">Install Game</button>
+            <button class="primary-button" id="playButton" type="button">
+              Play
+            </button>
+            <button
+              class="secondary-button hidden"
+              id="installButton"
+              type="button"
+            >
+              Install Game
+            </button>
           </div>
           <p class="download-note" id="downloadNote">
             This build is installable on supported phones and laptops.
@@ -37,14 +49,19 @@
               <p class="eyebrow">Match Setup</p>
               <h2>Choose Fighters And Controls</h2>
             </div>
-            <button class="ghost-button" id="backButton" type="button">Back</button>
+            <button class="ghost-button" id="backButton" type="button">
+              Back
+            </button>
           </div>
 
           <div class="setup-grid">
             <div class="roster-column">
               <div class="section-head">
                 <h3>Player Look</h3>
-                <p class="subtle-text">Pixel fighters with original wall-climber energy and skin variants.</p>
+                <p class="subtle-text">
+                  Pixel fighters with original wall-climber energy and skin
+                  variants.
+                </p>
               </div>
               <div class="roster-grid" id="rosterGrid"></div>
             </div>
@@ -68,16 +85,25 @@
               <div class="config-card">
                 <div class="config-group">
                   <h3>How Many Players?</h3>
-                  <p class="subtle-text">Choose 2 to 4 fighters for offline or online rounds.</p>
+                  <p class="subtle-text">
+                    Choose 2 to 4 fighters for offline or online rounds.
+                  </p>
                   <div class="player-count-grid" id="playerCountGrid"></div>
                 </div>
 
                 <div class="config-group">
                   <h3>Play On</h3>
-                  <p class="subtle-text">`Mobile` shows joystick controls. `Laptop` shows button controls.</p>
+                  <p class="subtle-text">
+                    `Mobile` shows joystick controls. `Laptop` shows button
+                    controls.
+                  </p>
                   <div class="device-toggle" id="deviceToggle">
-                    <button class="device-btn" id="deviceLaptop" type="button">Laptop</button>
-                    <button class="device-btn" id="deviceMobile" type="button">Mobile</button>
+                    <button class="device-btn" id="deviceLaptop" type="button">
+                      Laptop
+                    </button>
+                    <button class="device-btn" id="deviceMobile" type="button">
+                      Mobile
+                    </button>
                   </div>
                 </div>
               </div>
@@ -88,9 +114,14 @@
                     <h3>Offline Match</h3>
                     <span class="badge badge-good">Works without Wi-Fi</span>
                   </div>
-                  <p>Choose the player count and device style, then start a local round.</p>
+                  <p>
+                    Choose the player count and device style, then start a local
+                    round.
+                  </p>
                   <div class="slot-grid" id="offlinePreview"></div>
-                  <button class="mode-button" id="offlineButton" type="button">Start Offline Match</button>
+                  <button class="mode-button" id="offlineButton" type="button">
+                    Start Offline Match
+                  </button>
                 </article>
 
                 <article class="mode-card">
@@ -98,13 +129,36 @@
                     <h3>Online Match</h3>
                     <span class="badge badge-warn">Needs internet</span>
                   </div>
-                  <p>Create a room with the chosen capacity or join one with a room code.</p>
+                  <p>
+                    Create a room with the chosen capacity or join one with a
+                    room code.
+                  </p>
                   <div class="online-actions">
-                    <input id="playerName" maxlength="18" placeholder="Your name" />
-                    <button class="mode-button" id="createRoomButton" type="button">Create Room</button>
+                    <input
+                      id="playerName"
+                      maxlength="18"
+                      placeholder="Your name"
+                    />
+                    <button
+                      class="mode-button"
+                      id="createRoomButton"
+                      type="button"
+                    >
+                      Create Room
+                    </button>
                     <div class="join-row">
-                      <input id="roomCode" maxlength="4" placeholder="Room code" />
-                      <button class="secondary-button" id="joinRoomButton" type="button">Join</button>
+                      <input
+                        id="roomCode"
+                        maxlength="4"
+                        placeholder="Room code"
+                      />
+                      <button
+                        class="secondary-button"
+                        id="joinRoomButton"
+                        type="button"
+                      >
+                        Join
+                      </button>
                     </div>
                   </div>
                 </article>
@@ -121,16 +175,29 @@
 
       <section class="game-panel panel hidden" id="gamePanel">
         <div class="game-toolbar">
-          <div class="toolbar-left">
-            <button class="ghost-button" id="menuButton" type="button">Menu</button>
-          </div>
-          <button class="ghost-button" id="leaveMatchButton" type="button">Back To Setup</button>
+          <button
+            class="pause-strip"
+            id="pauseStrip"
+            type="button"
+            aria-label="Pause game"
+          ></button>
         </div>
 
         <div class="menu-popover hidden" id="menuPopover">
-          <div class="menu-head">
+          <div class="pause-panel">
             <strong>Paused</strong>
-            <button class="menu-close" id="resumeButton" type="button">Resume</button>
+            <div class="pause-actions">
+              <button class="primary-button" id="resumeButton" type="button">
+                Resume
+              </button>
+              <button
+                class="secondary-button"
+                id="leaveMatchButton"
+                type="button"
+              >
+                Back to Menu
+              </button>
+            </div>
           </div>
           <label class="controls-label" for="controlsSelect">Controls</label>
           <select id="controlsSelect">
@@ -156,11 +223,16 @@
         </div>
 
         <div class="canvas-container">
-          <canvas id="gameCanvas" width="960" height="600" aria-label="Game canvas"></canvas>
+          <canvas
+            id="gameCanvas"
+            width="960"
+            height="600"
+            aria-label="Game canvas"
+          ></canvas>
+          <div class="mobile-controls hidden" id="mobileControls"></div>
         </div>
 
         <div class="legend-grid" id="keyboardLegend"></div>
-        <div class="mobile-controls hidden" id="mobileControls"></div>
       </section>
     </div>
 
@@ -174,6 +246,6 @@
       </div>
     </template>
 
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

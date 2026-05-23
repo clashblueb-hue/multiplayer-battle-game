@@ -85,7 +85,7 @@ function generateLevel(state, levelNumber) {
   state.randomSeed = (19713 + levelNumber * 7919) % 4294967296;
 
   // Ground platform always present
-  platforms.push({ x: 80, y: GROUND_Y, w: WORLD_WIDTH - 160, h: 24 });
+  platforms.push({ x: 80, y: GROUND_Y, w: WORLD_WIDTH - 160, h: 24, isGround: true });
 
   if (levelNumber === 1) {
     // Flat opening floor. The first climb starts with the lift instead of nearby platforms.
@@ -543,12 +543,14 @@ function updateLiftEvent(state, dt) {
       lift.countdown = 0;
       lift.phase = "ascending";
 
-      // Determine who is ON the lift
+      // Determine who is ON the lift and penalize anyone left behind.
       lift.ridingPlayerIds = [];
       for (const player of state.players) {
         if (player.eliminated || player.respawnTimer > 0) continue;
         if (isStandingOnLift(player, lift)) {
           lift.ridingPlayerIds.push(player.id);
+        } else {
+          loseLife(state, player, "Left behind by the lift");
         }
       }
     }
@@ -1029,7 +1031,7 @@ function updatePlayer(state, player, input, deltaSeconds) {
 
   // Platform collision resolution
   for (const platform of colliders) {
-    const fallingThrough = input.down && player.y + player.h <= platform.y + 10;
+    const fallingThrough = input.down && player.y + player.h <= platform.y + 10 && !platform.isGround;
     if (fallingThrough) continue;
 
     const wasAbove = previousY + player.h <= platform.y;

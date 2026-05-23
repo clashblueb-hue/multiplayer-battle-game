@@ -22,7 +22,7 @@ const createRoomButton = document.getElementById("createRoomButton");
 const joinRoomButton = document.getElementById("joinRoomButton");
 const installButton = document.getElementById("installButton");
 const leaveMatchButton = document.getElementById("leaveMatchButton");
-const menuButton = document.getElementById("menuButton");
+const pauseStrip = document.getElementById("pauseStrip");
 const resumeButton = document.getElementById("resumeButton");
 const controlsSelect = document.getElementById("controlsSelect");
 
@@ -138,7 +138,7 @@ function setupEvents() {
   joinRoomButton.addEventListener("click", joinOnlineRoom);
   installButton.addEventListener("click", installGame);
   leaveMatchButton.addEventListener("click", leaveMatch);
-  menuButton.addEventListener("click", () => setPaused(!app.paused));
+  pauseStrip.addEventListener("click", () => setPaused(!app.paused));
   resumeButton.addEventListener("click", () => setPaused(false));
   controlsSelect.addEventListener("change", renderControlsPanel);
 
@@ -180,9 +180,11 @@ function setupEvents() {
 }
 
 function updateScreen() {
+  const isGame = app.screen === "game";
   titleScreen.classList.toggle("hidden", app.screen !== "title");
   setupScreen.classList.toggle("hidden", app.screen !== "setup");
-  gamePanel.classList.toggle("hidden", app.screen !== "game");
+  gamePanel.classList.toggle("hidden", !isGame);
+  document.body.classList.toggle("game-active", isGame);
 }
 
 function renderRoster() {
@@ -634,9 +636,25 @@ function buildMobileControls(players) {
   }
 
   mobileControls.classList.remove("hidden");
+  mobileControls.style.position = "absolute";
+  mobileControls.style.top = "0";
+  mobileControls.style.left = "0";
+  mobileControls.style.right = "0";
+  mobileControls.style.bottom = "0";
+  mobileControls.style.width = "100%";
+  mobileControls.style.height = "100%";
+  mobileControls.style.pointerEvents = "none";
+  mobileControls.style.zIndex = "20";
+  mobileControls.style.background = "transparent";
 
-  players.forEach((player) => {
+  const canvasContainer = mobileControls.parentElement;
+  if (canvasContainer instanceof HTMLElement) {
+    canvasContainer.style.position = "relative";
+  }
+
+  players.forEach((player, index) => {
     const fragment = joystickTemplate.content.cloneNode(true);
+    const pad = fragment.querySelector(".pad-card");
     const title = fragment.querySelector(".pad-title");
     const zone = fragment.querySelector(".stick-zone");
     const thumb = fragment.querySelector(".stick-thumb");
@@ -644,7 +662,20 @@ function buildMobileControls(players) {
     const inputId = app.mode === "online" ? "local" : player.id;
     let dragging = false;
 
+    if (pad instanceof HTMLElement) {
+      pad.style.position = "absolute";
+      pad.style.pointerEvents = "auto";
+      pad.style.background = "transparent";
+    }
+
+    pad.classList.add(`corner-${index + 1}`);
+
     title.textContent = app.mode === "online" ? "Your joystick" : `${player.name}`;
+
+    let dropTimer = 0;
+    let holdFrame = null;
+    let joystickDropped = false;
+    let lastHoldTimestamp = 0;
 
     const resetMovement = () => {
       thumb.style.transform = "translate(0px, 0px)";
@@ -656,6 +687,60 @@ function buildMobileControls(players) {
       input.right = false;
       input.up = false;
       input.down = false;
+    };
+
+    const dropJoystick = () => {
+      if (joystickDropped) return;
+      joystickDropped = true;
+      pad.classList.add("joystick-dropped");
+      zone.style.pointerEvents = "none";
+      thumb.style.transform = "translate(0px, 0px)";
+      const input = app.localInputs[inputId];
+      const pending = app.pendingPresses[inputId];
+      if (input) {
+        input.left = false;
+        input.right = false;
+        input.up = false;
+        input.down = false;
+      }
+      if (pending) {
+        pending.up = false;
+        pending.attack = false;
+      }
+      dragging = false;
+      resetJoystickHold();
+    };
+
+    const resetJoystickHold = () => {
+      dropTimer = 0;
+      lastHoldTimestamp = 0;
+      if (holdFrame) {
+        cancelAnimationFrame(holdFrame);
+        holdFrame = null;
+      }
+    };
+
+    const updateJoystickHold = (timestamp) => {
+      if (!dragging || joystickDropped) {
+        holdFrame = null;
+        return;
+      }
+      if (!lastHoldTimestamp) {
+        lastHoldTimestamp = timestamp;
+      }
+      const dt = (timestamp - lastHoldTimestamp) / 1000;
+      lastHoldTimestamp = timestamp;
+      const input = app.localInputs[inputId];
+      if (!input || !input.down) {
+        dropTimer = 0;
+      } else {
+        dropTimer += dt;
+        if (dropTimer >= 4) {
+          dropJoystick();
+          return;
+        }
+      }
+      holdFrame = requestAnimationFrame(updateJoystickHold);
     };
 
     const setInputFromPointer = (event) => {
@@ -689,12 +774,14 @@ function buildMobileControls(players) {
     };
 
     zone.addEventListener("pointerdown", (event) => {
-      if (app.paused) {
+      if (app.paused || joystickDropped) {
         return;
       }
       dragging = true;
       zone.setPointerCapture(event.pointerId);
       setInputFromPointer(event);
+      resetJoystickHold();
+      holdFrame = requestAnimationFrame(updateJoystickHold);
     });
 
     zone.addEventListener("pointermove", (event) => {
@@ -706,10 +793,12 @@ function buildMobileControls(players) {
     zone.addEventListener("pointerup", () => {
       dragging = false;
       resetMovement();
+      resetJoystickHold();
     });
     zone.addEventListener("pointercancel", () => {
       dragging = false;
       resetMovement();
+      resetJoystickHold();
     });
 
     attackButton.addEventListener("pointerdown", () => {
@@ -1078,24 +1167,53 @@ function drawPlayers(state) {
       context.translate(-centerX, -(y + player.h * 0.48));
     }
 
-    context.fillStyle = hurtFlash ? "#ffffff" : look.scarf;
-    context.fillRect(centerX - 9, y + 18, 20 + player.facing * lean * 0.2, 8);
-    context.fillStyle = hurtFlash ? "#ffffff" : look.trim;
-    context.fillRect(centerX - 12 + lean * 0.3, y + 12, 24, 18);
+    const headY = y;
+    const torsoY = y + 16;
+    const legY = y + 48;
+    const armOffset = walkPhase * 2;
+
+    // Head and helmet
     context.fillStyle = hurtFlash ? "#ffffff" : look.body;
-    context.fillRect(centerX - 16 + lean * 0.2, y + 18, 32 * attackStretch, 28);
+    context.fillRect(centerX - 14, headY, 28, 18);
+    context.fillStyle = hurtFlash ? "#ffffff" : look.trim;
+    context.fillRect(centerX - 18, headY + 4, 6, 10);
+    context.fillRect(centerX + 12, headY + 4, 6, 10);
+    context.fillStyle = hurtFlash ? "#ffffff" : look.visor;
+    context.fillRect(centerX - 10, headY + 4, 20, 6);
     context.fillStyle = hurtFlash ? "#ffffff" : look.accent;
-    context.fillRect(centerX - 12, y + 22, 24, 8);
-    context.fillStyle = hurtFlash ? "#ffffff" : look.trim;
-    context.fillRect(centerX - 20, y + 18 + walkPhase * 2, 7, 19);
-    context.fillRect(centerX + 13, y + 18 - walkPhase * 2, 7, 19);
-    context.fillStyle = hurtFlash ? "#ffffff" : look.outline;
-    context.fillRect(centerX - 11, y + 46 + walkPhase * 2, 8, 15);
-    context.fillRect(centerX + 3, y + 46 - walkPhase * 2, 8, 15);
+    context.fillRect(centerX - 8, headY + 12, 16, 4);
+
+    // Collar / scarf
+    context.fillStyle = hurtFlash ? "#ffffff" : look.scarf;
+    context.fillRect(centerX - 12, headY + 14, 24, 8);
+
+    // Arms
     context.fillStyle = hurtFlash ? "#ffffff" : look.body;
-    context.fillRect(centerX - 14, y + 0, 28, 18);
-    context.fillStyle = look.visor;
-    context.fillRect(centerX - 11, y + 6, 22, 6);
+    context.fillRect(centerX - 28, torsoY + 4 + armOffset, 10, 26);
+    context.fillRect(centerX + 18, torsoY + 4 - armOffset, 10, 26);
+    context.fillStyle = hurtFlash ? "#ffffff" : look.accent;
+    context.fillRect(centerX - 26, torsoY + 18 + armOffset, 6, 10);
+    context.fillRect(centerX + 24, torsoY + 18 - armOffset, 6, 10);
+
+    // Torso and chest plates
+    context.fillStyle = hurtFlash ? "#ffffff" : look.body;
+    context.fillRect(centerX - 16, torsoY + 6, 32 * attackStretch, 28);
+    context.fillStyle = hurtFlash ? "#ffffff" : look.accent;
+    context.fillRect(centerX - 12, torsoY + 12, 24, 8);
+    context.fillStyle = hurtFlash ? "#ffffff" : look.trim;
+    context.fillRect(centerX - 20, torsoY + 8, 8, 24);
+    context.fillRect(centerX + 12, torsoY + 8, 8, 24);
+    context.fillStyle = "rgba(255,255,255,0.12)";
+    context.fillRect(centerX - 6, torsoY + 10, 4, 18);
+    context.fillRect(centerX + 2, torsoY + 10, 4, 18);
+
+    // Boots and legs
+    context.fillStyle = hurtFlash ? "#ffffff" : look.trim;
+    context.fillRect(centerX - 14, legY, 10, 12);
+    context.fillRect(centerX + 4, legY, 10, 12);
+    context.fillStyle = hurtFlash ? "#ffffff" : look.outline;
+    context.fillRect(centerX - 14, legY + 8, 10, 4);
+    context.fillRect(centerX + 4, legY + 8, 10, 4);
 
     if (player.weaponType === "sword") {
       const swordX = centerX + (player.facing === 1 ? 11 : -18);
@@ -1133,8 +1251,14 @@ function drawPlayers(state) {
     context.fillRect(x, y - 18, 44, 5);
     context.fillStyle = "#8ff0b6";
     context.fillRect(x, y - 18, 44 * (player.health / 100), 5);
-    context.fillStyle = "#ffffff";
-    context.fillText(`L${player.lives}`, x + 48, y - 12);
+
+    const heartX = x + 8;
+    const heartY = y - 8;
+    context.font = "14px Trebuchet MS, sans-serif";
+    for (let heartIndex = 0; heartIndex < 3; heartIndex += 1) {
+      context.fillStyle = player.lives > heartIndex ? "#ff6b7f" : "rgba(255,255,255,0.18)";
+      context.fillText("♥", heartX + heartIndex * 14, heartY);
+    }
 
     context.globalAlpha = 1;
   });
@@ -1151,30 +1275,20 @@ function drawSummitGlow() {
 }
 
 function drawHudOverlay(state) {
-  context.fillStyle = "rgba(17, 24, 38, 0.8)";
-  context.fillRect(18, 18, 430, 84);
-  context.strokeStyle = "rgba(255,255,255,0.12)";
-  context.strokeRect(18, 18, 430, 84);
-  context.fillStyle = "#f8f9ff";
-  context.font = "700 21px Impact, sans-serif";
-  context.fillText(formatPhase(state.phase), 34, 46);
-  context.font = "15px Trebuchet MS, sans-serif";
-  context.fillStyle = "#d0dcea";
-  context.fillText(state.eventText, 34, 70);
-  context.fillText(state.message, 34, 92);
-
-  if (state.phase === "finished") {
-    context.fillStyle = "rgba(10, 14, 23, 0.88)";
-    context.fillRect(220, 220, 520, 150);
-    context.strokeStyle = "rgba(255,255,255,0.12)";
-    context.strokeRect(220, 220, 520, 150);
-    context.fillStyle = "#f8f9ff";
-    context.font = "700 36px Impact, sans-serif";
-    context.fillText(`${state.winnerName} wins!`, 360, 286);
-    context.font = "18px Trebuchet MS, sans-serif";
-    context.fillStyle = "#d0dcea";
-    context.fillText("Use the menu to review controls or go back to setup.", 282, 325);
+  if (state.phase !== "finished") {
+    return;
   }
+
+  context.fillStyle = "rgba(10, 14, 23, 0.88)";
+  context.fillRect(220, 220, 520, 150);
+  context.strokeStyle = "rgba(255,255,255,0.12)";
+  context.strokeRect(220, 220, 520, 150);
+  context.fillStyle = "#f8f9ff";
+  context.font = "700 36px Impact, sans-serif";
+  context.fillText(`${state.winnerName} wins!`, 360, 286);
+  context.font = "18px Trebuchet MS, sans-serif";
+  context.fillStyle = "#d0dcea";
+  context.fillText("Use the menu to review controls or go back to setup.", 282, 325);
 }
 
 function drawLiftCountdown(state) {
@@ -1183,14 +1297,27 @@ function drawLiftCountdown(state) {
   }
 
   const countdown = Math.max(0, Math.ceil(state.liftEvent.countdown));
-  context.fillStyle = "rgba(10, 14, 23, 0.24)";
-  context.fillRect(0, 0, canvas.width, canvas.height);
+  const panelHeight = 92;
+  const panelWidth = Math.min(canvas.width - 36, 420);
+  const panelX = (canvas.width - panelWidth) / 2;
+  const panelY = canvas.height - panelHeight - 18;
+
+  context.fillStyle = "rgba(10, 14, 23, 0.8)";
+  context.fillRect(panelX, panelY, panelWidth, panelHeight);
+  context.strokeStyle = "rgba(255,255,255,0.12)";
+  context.strokeRect(panelX, panelY, panelWidth, panelHeight);
+
   context.fillStyle = "#f8c953";
-  context.font = "700 92px Impact, sans-serif";
-  context.fillText(String(countdown), canvas.width / 2 - 26, canvas.height / 2);
-  context.font = "20px Trebuchet MS, sans-serif";
+  context.font = "700 64px Impact, sans-serif";
+  const countdownText = String(countdown);
+  const countdownWidth = context.measureText(countdownText).width;
+  context.fillText(countdownText, canvas.width / 2 - countdownWidth / 2, panelY + 52);
+
+  const label = "Get on the lift before zero.";
+  context.font = "16px Trebuchet MS, sans-serif";
   context.fillStyle = "#ffffff";
-  context.fillText("Get on the lift before zero.", canvas.width / 2 - 100, canvas.height / 2 + 34);
+  const labelWidth = context.measureText(label).width;
+  context.fillText(label, canvas.width / 2 - labelWidth / 2, panelY + 76);
 }
 
 function drawLevelTransition(state) {
@@ -1226,21 +1353,41 @@ function drawPosterCharacter(character, x, y, scale) {
   const top = y - height;
   context.save();
   context.translate(x, top);
-  context.fillStyle = look.scarf;
-  context.fillRect(width * 0.24, height * 0.23, width * 0.34, height * 0.1);
-  context.fillStyle = look.trim;
-  context.fillRect(width * 0.28, height * 0.16, width * 0.44, height * 0.22);
+
+  // Head and visor
   context.fillStyle = look.body;
-  context.fillRect(width * 0.18, height * 0.22, width * 0.64, height * 0.38);
-  context.fillStyle = look.accent;
-  context.fillRect(width * 0.26, height * 0.29, width * 0.48, height * 0.08);
-  context.fillStyle = look.outline;
-  context.fillRect(width * 0.28, height * 0.6, width * 0.14, height * 0.24);
-  context.fillRect(width * 0.58, height * 0.6, width * 0.14, height * 0.24);
-  context.fillStyle = look.body;
-  context.fillRect(width * 0.24, 0, width * 0.52, height * 0.18);
+  context.fillRect(width * 0.28, height * 0.00, width * 0.44, height * 0.18);
   context.fillStyle = look.visor;
-  context.fillRect(width * 0.3, height * 0.06, width * 0.4, height * 0.06);
+  context.fillRect(width * 0.36, height * 0.06, width * 0.28, height * 0.08);
+  context.fillStyle = look.trim;
+  context.fillRect(width * 0.20, height * 0.04, width * 0.08, height * 0.10);
+  context.fillRect(width * 0.72, height * 0.04, width * 0.08, height * 0.10);
+  context.fillStyle = look.accent;
+  context.fillRect(width * 0.34, height * 0.14, width * 0.32, height * 0.04);
+
+  // Collar / scarf
+  context.fillStyle = look.scarf;
+  context.fillRect(width * 0.26, height * 0.18, width * 0.48, height * 0.08);
+
+  // Torso
+  context.fillStyle = look.body;
+  context.fillRect(width * 0.22, height * 0.26, width * 0.56, height * 0.30);
+  context.fillStyle = look.accent;
+  context.fillRect(width * 0.30, height * 0.34, width * 0.40, height * 0.08);
+  context.fillStyle = look.trim;
+  context.fillRect(width * 0.22, height * 0.34, width * 0.08, height * 0.18);
+  context.fillRect(width * 0.70, height * 0.34, width * 0.08, height * 0.18);
+  context.fillStyle = "rgba(255,255,255,0.12)";
+  context.fillRect(width * 0.44, height * 0.30, width * 0.08, height * 0.16);
+
+  // Legs and boots
+  context.fillStyle = look.trim;
+  context.fillRect(width * 0.22, height * 0.56, width * 0.14, height * 0.18);
+  context.fillRect(width * 0.64, height * 0.56, width * 0.14, height * 0.18);
+  context.fillStyle = look.outline;
+  context.fillRect(width * 0.22, height * 0.70, width * 0.14, height * 0.08);
+  context.fillRect(width * 0.64, height * 0.70, width * 0.14, height * 0.08);
+
   context.restore();
 }
 
