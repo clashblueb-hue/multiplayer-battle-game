@@ -1,4 +1,4 @@
-const CACHE_NAME = "sky-scramble-v2";
+const CACHE_NAME = "sky-scramble-v3";
 const ASSETS = [
   "/",
   "/index.html",

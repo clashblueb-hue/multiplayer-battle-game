@@ -384,8 +384,14 @@ body.game-active .title-screen,
 body.game-active .setup-screen,
 body.game-active .status-bar,
 body.game-active .hud,
+body.game-active .hud-setup-only,
 body.game-active .legend-grid {
   display: none !important;
+}
+
+body.game-active.offline-match .shell {
+  padding: 0;
+  max-width: none;
 }
 
 body.game-active .game-panel {
@@ -410,6 +416,7 @@ body.game-active .canvas-container {
   height: 100% !important;
   border: none !important;
   box-shadow: none !important;
+  touch-action: none;
 }
 
 body.game-active canvas {
@@ -424,42 +431,60 @@ body.game-active .mobile-controls {
   height: 100% !important;
 }
 
-.game-toolbar {
-  position: relative;
-  min-height: 0;
-  margin-bottom: 0;
-}
-
 .pause-strip {
   position: fixed;
-  left: 16px;
+  left: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 14px;
-  height: 160px;
+  width: 10px;
+  height: min(42vh, 220px);
   min-height: 120px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #68b6ff 0%, #306aff 100%);
-  box-shadow: 0 0 0 2px rgba(40, 86, 190, 0.24);
+  border-radius: 0 999px 999px 0;
+  background: linear-gradient(180deg, #7ec8ff 0%, #2f6dff 55%, #1a4fd6 100%);
+  box-shadow:
+    2px 0 0 rgba(255, 255, 255, 0.22),
+    0 0 18px rgba(48, 106, 255, 0.45);
   border: none;
   cursor: pointer;
-  z-index: 9998;
+  z-index: 40;
+  padding: 0;
+}
+
+.pause-strip::after {
+  content: "";
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  width: 18px;
+  height: 1px;
+  transform: translateY(-50%);
+  background: rgba(126, 200, 255, 0.55);
+}
+
+body.game-active .pause-strip {
+  display: block;
 }
 
 .menu-popover {
-  position: absolute;
+  position: fixed;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 30;
-  background: rgba(10, 14, 23, 0.55);
+  z-index: 50;
+  background: rgba(8, 12, 22, 0.42);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   padding: 24px;
+}
+
+.menu-popover:not(.hidden) {
+  pointer-events: auto;
 }
 
 .pause-panel {
   width: min(320px, 90vw);
-  background: rgba(12, 23, 58, 0.95);
+  background: rgba(12, 23, 58, 0.82);
   border: 3px solid #5aa2ff;
   box-shadow: 0 12px 50px rgba(0, 0, 0, 0.35);
   border-radius: 18px;
@@ -476,15 +501,16 @@ body.game-active .mobile-controls {
   color: #eaf1ff;
 }
 
+.pause-hint {
+  margin: 0;
+  color: #b8c9e8;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
 .pause-actions {
   display: grid;
   gap: 12px;
-}
-
-.menu-popover .controls-label,
-.menu-popover #controlsSelect,
-.menu-popover .controls-panel {
-  display: none;
 }
 
 .controls-label {
@@ -607,23 +633,28 @@ canvas {
 }
 
 .pad-card.corner-1 {
-  left: 16px;
-  bottom: 16px;
+  left: 12px;
+  bottom: 12px;
 }
 
 .pad-card.corner-2 {
-  right: 16px;
-  bottom: 16px;
+  right: 12px;
+  bottom: 12px;
 }
 
 .pad-card.corner-3 {
-  left: 16px;
-  top: 16px;
+  left: 12px;
+  top: 12px;
 }
 
 .pad-card.corner-4 {
-  right: 16px;
-  top: 16px;
+  right: 12px;
+  top: 12px;
+}
+
+body.game-active .pad-card.corner-1,
+body.game-active .pad-card.corner-3 {
+  left: 22px;
 }
 
 .pad-title {
@@ -632,13 +663,14 @@ canvas {
 
 .stick-zone {
   position: relative;
-  width: 104px;
-  height: 104px;
+  width: 96px;
+  height: 96px;
   margin: 0;
-  border: 3px solid rgba(255, 255, 255, 0.6);
-  background: rgba(255, 255, 255, 0.04);
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  background: rgba(8, 14, 28, 0.12);
   border-radius: 999px;
   touch-action: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .stick-thumb {
@@ -655,14 +687,16 @@ canvas {
 }
 
 .attack-button {
-  width: 100px;
-  min-height: 42px;
-  padding: 10px 12px;
-  border: 2px solid rgba(255, 176, 176, 0.9);
-  background: rgba(255, 176, 176, 0.18);
+  width: 52px;
+  min-height: 52px;
+  padding: 0;
+  border: 2px solid rgba(255, 176, 176, 0.75);
+  background: rgba(255, 120, 120, 0.2);
   color: #fff;
-  text-transform: uppercase;
-  font-weight: 700;
+  font-size: 1.35rem;
+  line-height: 1;
+  border-radius: 999px;
+  box-shadow: none;
 }
 
 @media (max-width: 1040px) {
@@ -705,8 +739,4 @@ canvas {
     grid-template-columns: 1fr;
   }
 
-  .game-toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
 }

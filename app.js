@@ -185,6 +185,7 @@ function updateScreen() {
   setupScreen.classList.toggle("hidden", app.screen !== "setup");
   gamePanel.classList.toggle("hidden", !isGame);
   document.body.classList.toggle("game-active", isGame);
+  document.body.classList.toggle("offline-match", isGame && app.mode === "offline");
 }
 
 function renderRoster() {
@@ -392,7 +393,16 @@ function addControlRow(label, value) {
   controlsPanel.appendChild(row);
 }
 
+function prefersTouchControls() {
+  return window.matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
+}
+
 function startOfflineMatch() {
+  if (prefersTouchControls()) {
+    app.deviceMode = "mobile";
+    updateDeviceButtons();
+  }
+
   const players = createOfflinePlayers();
   app.mode = "offline";
   app.screen = "game";
@@ -478,7 +488,8 @@ function connectSocket() {
   app.pendingPresses = { local: { up: false, attack: false } };
 
   const protocol = location.protocol === "https:" ? "wss" : "ws";
-  app.socket = new WebSocket(`${protocol}://${location.host}/ws`);
+  const host = location.host || "localhost";
+  app.socket = new WebSocket(`${protocol}://${host}/ws`);
   app.socketReady = new Promise((resolve, reject) => {
     app.socket.addEventListener("open", resolve, { once: true });
     app.socket.addEventListener("error", reject, { once: true });
@@ -565,6 +576,7 @@ function leaveMatch() {
 function setPaused(shouldPause) {
   app.paused = shouldPause;
   menuPopover.classList.toggle("hidden", !shouldPause);
+  menuPopover.setAttribute("aria-hidden", shouldPause ? "false" : "true");
   if (!shouldPause) {
     controlsSelect.value = "current";
     renderControlsPanel();
@@ -1215,6 +1227,8 @@ function drawPlayers(state) {
     context.fillRect(centerX - 14, legY + 8, 10, 4);
     context.fillRect(centerX + 4, legY + 8, 10, 4);
 
+    drawCharacterFlair(player.characterId, look, centerX, headY, torsoY, hurtFlash);
+
     if (player.weaponType === "sword") {
       const swordX = centerX + (player.facing === 1 ? 11 : -18);
       context.fillStyle = "#d7ecff";
@@ -1244,20 +1258,19 @@ function drawPlayers(state) {
 
     context.restore();
 
-    context.fillStyle = "#ffffff";
-    context.font = "11px Trebuchet MS, sans-serif";
-    context.fillText(player.name, x - 2, y - 8);
+    if (app.mode !== "offline") {
+      context.fillStyle = "#ffffff";
+      context.font = "11px Trebuchet MS, sans-serif";
+      context.fillText(player.name, x - 2, y - 8);
+    }
+
     context.fillStyle = "rgba(0,0,0,0.45)";
     context.fillRect(x, y - 18, 44, 5);
     context.fillStyle = "#8ff0b6";
     context.fillRect(x, y - 18, 44 * (player.health / 100), 5);
 
-    const heartX = x + 8;
-    const heartY = y - 8;
-    context.font = "14px Trebuchet MS, sans-serif";
     for (let heartIndex = 0; heartIndex < 3; heartIndex += 1) {
-      context.fillStyle = player.lives > heartIndex ? "#ff6b7f" : "rgba(255,255,255,0.18)";
-      context.fillText("♥", heartX + heartIndex * 14, heartY);
+      drawPixelHeart(x + 6 + heartIndex * 14, y - 22, player.lives > heartIndex);
     }
 
     context.globalAlpha = 1;
@@ -1297,6 +1310,20 @@ function drawLiftCountdown(state) {
   }
 
   const countdown = Math.max(0, Math.ceil(state.liftEvent.countdown));
+  const countdownText = String(countdown);
+
+  if (app.mode === "offline") {
+    context.fillStyle = "rgba(10, 14, 23, 0.55)";
+    context.fillRect(canvas.width / 2 - 34, 14, 68, 52);
+    context.strokeStyle = "rgba(248, 201, 83, 0.45)";
+    context.strokeRect(canvas.width / 2 - 34, 14, 68, 52);
+    context.fillStyle = "#f8c953";
+    context.font = "700 42px Impact, sans-serif";
+    const countdownWidth = context.measureText(countdownText).width;
+    context.fillText(countdownText, canvas.width / 2 - countdownWidth / 2, 50);
+    return;
+  }
+
   const panelHeight = 92;
   const panelWidth = Math.min(canvas.width - 36, 420);
   const panelX = (canvas.width - panelWidth) / 2;
@@ -1309,7 +1336,6 @@ function drawLiftCountdown(state) {
 
   context.fillStyle = "#f8c953";
   context.font = "700 64px Impact, sans-serif";
-  const countdownText = String(countdown);
   const countdownWidth = context.measureText(countdownText).width;
   context.fillText(countdownText, canvas.width / 2 - countdownWidth / 2, panelY + 52);
 
@@ -1331,10 +1357,14 @@ function drawLevelTransition(state) {
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.fillStyle = "#f8f9ff";
   context.font = "700 44px Impact, sans-serif";
-  context.fillText(`Level ${state.levelTransition.nextLevel}`, canvas.width / 2 - 90, canvas.height / 2 - 10);
-  context.font = "18px Trebuchet MS, sans-serif";
-  context.fillStyle = "#d0dcea";
-  context.fillText("The tower shifts into a new arena...", canvas.width / 2 - 140, canvas.height / 2 + 24);
+  const levelLabel = `Level ${state.levelTransition.nextLevel}`;
+  const levelWidth = context.measureText(levelLabel).width;
+  context.fillText(levelLabel, canvas.width / 2 - levelWidth / 2, canvas.height / 2 - 10);
+  if (app.mode !== "offline") {
+    context.font = "18px Trebuchet MS, sans-serif";
+    context.fillStyle = "#d0dcea";
+    context.fillText("The tower shifts into a new arena...", canvas.width / 2 - 140, canvas.height / 2 + 24);
+  }
 }
 
 function drawPauseCurtain() {
@@ -1342,8 +1372,85 @@ function drawPauseCurtain() {
     return;
   }
 
-  context.fillStyle = "rgba(10, 14, 23, 0.35)";
+  context.fillStyle = "rgba(10, 14, 23, 0.22)";
   context.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawPixelHeart(x, y, filled) {
+  const body = filled ? "#ff4d6d" : "rgba(255, 255, 255, 0.14)";
+  const shine = filled ? "#ffd1dc" : "rgba(255, 255, 255, 0.08)";
+  context.fillStyle = body;
+  context.fillRect(x, y + 1, 4, 4);
+  context.fillRect(x + 6, y + 1, 4, 4);
+  context.fillRect(x + 2, y + 4, 6, 5);
+  context.fillStyle = shine;
+  context.fillRect(x + 3, y + 2, 2, 2);
+}
+
+function drawCharacterFlair(characterId, look, centerX, headY, torsoY, hurtFlash) {
+  if (hurtFlash) {
+    return;
+  }
+
+  switch (characterId) {
+    case "kestrel":
+      context.fillStyle = look.accent;
+      context.fillRect(centerX - 8, headY + 5, 3, 2);
+      context.fillRect(centerX + 5, headY + 5, 3, 2);
+      context.fillStyle = look.scarf;
+      context.fillRect(centerX - 5, headY + 15, 10, 3);
+      context.fillStyle = look.trim;
+      context.fillRect(centerX - 2, torsoY + 18, 4, 10);
+      break;
+    case "mako":
+      for (let stripe = 0; stripe < 3; stripe += 1) {
+        context.fillStyle = stripe % 2 === 0 ? look.accent : look.trim;
+        context.fillRect(centerX - 12 + stripe * 8, torsoY + 14, 6, 3);
+      }
+      context.fillStyle = look.visor;
+      context.fillRect(centerX - 4, headY + 7, 8, 2);
+      break;
+    case "piper":
+      context.fillStyle = look.accent;
+      context.fillRect(centerX - 10, torsoY + 10, 4, 4);
+      context.fillRect(centerX + 6, torsoY + 16, 4, 4);
+      context.fillRect(centerX - 2, torsoY + 22, 4, 4);
+      context.fillStyle = look.scarf;
+      context.fillRect(centerX - 14, headY + 16, 4, 6);
+      context.fillRect(centerX + 10, headY + 16, 4, 6);
+      break;
+    case "rook":
+      context.fillStyle = look.accent;
+      context.fillRect(centerX - 4, headY + 2, 8, 4);
+      context.fillStyle = look.trim;
+      context.fillRect(centerX - 16, torsoY + 10, 4, 18);
+      context.fillRect(centerX + 12, torsoY + 10, 4, 18);
+      context.fillStyle = look.scarf;
+      context.fillRect(centerX - 6, torsoY + 24, 12, 3);
+      break;
+    case "ember":
+      context.fillStyle = look.accent;
+      context.fillRect(centerX - 6, headY + 8, 12, 2);
+      context.fillStyle = look.scarf;
+      context.fillRect(centerX - 12, torsoY + 12, 3, 12);
+      context.fillRect(centerX + 9, torsoY + 12, 3, 12);
+      context.fillStyle = look.trim;
+      context.fillRect(centerX - 4, torsoY + 20, 8, 4);
+      break;
+    case "glint":
+      context.fillStyle = look.accent;
+      context.fillRect(centerX - 2, headY + 3, 4, 10);
+      context.fillStyle = look.visor;
+      context.fillRect(centerX - 10, headY + 10, 20, 2);
+      context.fillStyle = look.trim;
+      context.fillRect(centerX - 14, torsoY + 14, 28, 2);
+      context.fillRect(centerX - 14, torsoY + 22, 28, 2);
+      break;
+    default:
+      context.fillStyle = look.accent;
+      context.fillRect(centerX - 4, torsoY + 14, 8, 4);
+      break;
+  }
 }
 
 function drawPosterCharacter(character, x, y, scale) {
@@ -1388,12 +1495,15 @@ function drawPosterCharacter(character, x, y, scale) {
   context.fillRect(width * 0.22, height * 0.70, width * 0.14, height * 0.08);
   context.fillRect(width * 0.64, height * 0.70, width * 0.14, height * 0.08);
 
+  drawCharacterFlair(character.id, look, width * 0.5, height * 0.02, height * 0.28, false);
+
   context.restore();
 }
 
 function characterPortraitSvg(character, size) {
   const look = character.look;
   const dimensions = size === "large" ? 190 : size === "slot" ? 94 : 112;
+  const emblem = getPortraitEmblemMarkup(character.id, look);
   return `
     <svg viewBox="0 0 120 140" width="${dimensions}" height="${Math.round(dimensions * 1.18)}" aria-hidden="true">
       <rect x="8" y="10" width="104" height="120" fill="rgba(255,255,255,0.04)"></rect>
@@ -1408,8 +1518,28 @@ function characterPortraitSvg(character, size) {
       <rect x="67" y="72" width="11" height="32" fill="${look.outline}"></rect>
       <rect x="38" y="104" width="17" height="7" fill="${look.trim}"></rect>
       <rect x="65" y="104" width="17" height="7" fill="${look.trim}"></rect>
+      ${emblem}
     </svg>
   `;
+}
+
+function getPortraitEmblemMarkup(characterId, look) {
+  switch (characterId) {
+    case "kestrel":
+      return `<rect x="52" y="18" width="4" height="4" fill="${look.accent}"></rect><rect x="64" y="18" width="4" height="4" fill="${look.accent}"></rect><rect x="56" y="52" width="8" height="3" fill="${look.scarf}"></rect>`;
+    case "mako":
+      return `<rect x="44" y="48" width="8" height="3" fill="${look.accent}"></rect><rect x="56" y="52" width="8" height="3" fill="${look.trim}"></rect><rect x="68" y="48" width="8" height="3" fill="${look.accent}"></rect>`;
+    case "piper":
+      return `<rect x="42" y="46" width="4" height="4" fill="${look.accent}"></rect><rect x="74" y="54" width="4" height="4" fill="${look.accent}"></rect><rect x="58" y="60" width="4" height="4" fill="${look.accent}"></rect>`;
+    case "rook":
+      return `<rect x="54" y="16" width="12" height="5" fill="${look.accent}"></rect><rect x="56" y="62" width="8" height="3" fill="${look.scarf}"></rect>`;
+    case "ember":
+      return `<rect x="48" y="24" width="24" height="2" fill="${look.accent}"></rect><rect x="36" y="48" width="3" height="10" fill="${look.scarf}"></rect><rect x="81" y="48" width="3" height="10" fill="${look.scarf}"></rect>`;
+    case "glint":
+      return `<rect x="58" y="16" width="4" height="12" fill="${look.accent}"></rect><rect x="42" y="52" width="36" height="2" fill="${look.trim}"></rect><rect x="42" y="60" width="36" height="2" fill="${look.trim}"></rect>`;
+    default:
+      return `<rect x="56" y="50" width="8" height="4" fill="${look.accent}"></rect>`;
+  }
 }
 
 function worldToScreenX(x) {
@@ -1470,12 +1600,15 @@ function escapeHtml(text) {
 }
 
 async function registerOfflineSupport() {
-  if ("serviceWorker" in navigator) {
-    try {
-      await navigator.serviceWorker.register("/sw.js");
-    } catch (error) {
-      statusText.textContent = "Offline caching could not be enabled in this browser.";
-    }
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+
+  try {
+    const swUrl = new URL("sw.js", import.meta.url);
+    await navigator.serviceWorker.register(swUrl.pathname);
+  } catch (error) {
+    statusText.textContent = "Offline caching could not be enabled in this browser.";
   }
 }
 

@@ -174,18 +174,17 @@
       </section>
 
       <section class="game-panel panel hidden" id="gamePanel">
-        <div class="game-toolbar">
-          <button
-            class="pause-strip"
-            id="pauseStrip"
-            type="button"
-            aria-label="Pause game"
-          ></button>
-        </div>
+        <button
+          class="pause-strip"
+          id="pauseStrip"
+          type="button"
+          aria-label="Pause game"
+        ></button>
 
-        <div class="menu-popover hidden" id="menuPopover">
+        <div class="menu-popover hidden" id="menuPopover" aria-hidden="true">
           <div class="pause-panel">
             <strong>Paused</strong>
+            <p class="pause-hint">Players stay frozen behind the menu.</p>
             <div class="pause-actions">
               <button class="primary-button" id="resumeButton" type="button">
                 Resume
@@ -199,15 +198,9 @@
               </button>
             </div>
           </div>
-          <label class="controls-label" for="controlsSelect">Controls</label>
-          <select id="controlsSelect">
-            <option value="current">Current controls</option>
-            <option value="all">All local controls</option>
-          </select>
-          <div class="controls-panel" id="controlsPanel"></div>
         </div>
 
-        <div class="hud">
+        <div class="hud hud-setup-only">
           <div class="hud-box">
             <span class="hud-label">Phase</span>
             <strong id="phaseText">Waiting</strong>
@@ -222,7 +215,7 @@
           </div>
         </div>
 
-        <div class="canvas-container">
+        <div class="canvas-container" id="gameStage">
           <canvas
             id="gameCanvas"
             width="960"
@@ -233,16 +226,22 @@
         </div>
 
         <div class="legend-grid" id="keyboardLegend"></div>
+
+        <select id="controlsSelect" class="hidden" aria-hidden="true" tabindex="-1">
+          <option value="current">Current controls</option>
+          <option value="all">All local controls</option>
+        </select>
+        <div class="controls-panel hidden" id="controlsPanel" aria-hidden="true"></div>
       </section>
     </div>
 
     <template id="joystickTemplate">
       <div class="pad-card">
         <div class="pad-title"></div>
-        <div class="stick-zone">
+        <div class="stick-zone" aria-label="Move joystick">
           <div class="stick-thumb"></div>
         </div>
-        <button class="attack-button" type="button">Shoot / Punch</button>
+        <button class="attack-button" type="button" aria-label="Shoot or punch">⚔</button>
       </div>
     </template>
 
