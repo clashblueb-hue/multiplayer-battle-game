@@ -11,10 +11,10 @@
     />
     <title>Sky Scramble Showdown</title>
     <link rel="manifest" href="site.webmanifest" />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=6" />
   </head>
   <body>
-    <div class="shell">
+    <div class="shell" id="menuShell">
       <section class="screen title-screen panel" id="titleScreen">
         <div class="title-copy">
           <p class="eyebrow">Pixel Summit Brawler</p>
@@ -172,68 +172,69 @@
         <span id="networkBadge">Checking connection...</span>
         <span id="statusText">Press Play to choose players and controls.</span>
       </section>
-
-      <section class="game-panel panel hidden" id="gamePanel">
-        <button
-          class="pause-strip"
-          id="pauseStrip"
-          type="button"
-          aria-label="Pause game"
-        ></button>
-
-        <div class="menu-popover hidden" id="menuPopover" aria-hidden="true">
-          <div class="pause-panel">
-            <strong>Paused</strong>
-            <p class="pause-hint">Players stay frozen behind the menu.</p>
-            <div class="pause-actions">
-              <button class="primary-button" id="resumeButton" type="button">
-                Resume
-              </button>
-              <button
-                class="secondary-button"
-                id="leaveMatchButton"
-                type="button"
-              >
-                Back to Menu
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="hud hud-setup-only">
-          <div class="hud-box">
-            <span class="hud-label">Phase</span>
-            <strong id="phaseText">Waiting</strong>
-          </div>
-          <div class="hud-box">
-            <span class="hud-label">Event</span>
-            <strong id="eventText">No match running</strong>
-          </div>
-          <div class="hud-box">
-            <span class="hud-label">Room</span>
-            <strong id="roomText">Local</strong>
-          </div>
-        </div>
-
-        <div class="canvas-container" id="gameStage">
-          <canvas
-            id="gameCanvas"
-            width="960"
-            height="600"
-            aria-label="Game canvas"
-          ></canvas>
-          <div class="mobile-controls hidden" id="mobileControls"></div>
-        </div>
-
-        <div class="legend-grid" id="keyboardLegend"></div>
-
-        <select id="controlsSelect" class="hidden" aria-hidden="true" tabindex="-1">
-          <option value="current">Current controls</option>
-          <option value="all">All local controls</option>
-        </select>
-        <div class="controls-panel hidden" id="controlsPanel" aria-hidden="true"></div>
-      </section>
     </div>
+
+    <section class="game-panel hidden" id="gamePanel">
+      <button
+        class="pause-strip"
+        id="pauseStrip"
+        type="button"
+        aria-label="Pause game"
+      ></button>
+
+      <div class="menu-popover hidden" id="menuPopover" aria-hidden="true">
+        <div class="pause-panel">
+          <strong>Paused</strong>
+          <p class="pause-hint">Players stay frozen behind the menu.</p>
+          <div class="pause-actions">
+            <button class="primary-button" id="resumeButton" type="button">
+              Resume
+            </button>
+            <button
+              class="secondary-button"
+              id="leaveMatchButton"
+              type="button"
+            >
+              Back to Menu
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="hud hud-setup-only hidden">
+        <div class="hud-box">
+          <span class="hud-label">Phase</span>
+          <strong id="phaseText">Waiting</strong>
+        </div>
+        <div class="hud-box">
+          <span class="hud-label">Event</span>
+          <strong id="eventText">No match running</strong>
+        </div>
+        <div class="hud-box">
+          <span class="hud-label">Room</span>
+          <strong id="roomText">Local</strong>
+        </div>
+      </div>
+
+      <div class="canvas-container" id="gameStage">
+        <canvas
+          id="gameCanvas"
+          width="960"
+          height="600"
+          aria-label="Game canvas"
+        ></canvas>
+        <div class="mobile-controls" id="mobileControls"></div>
+      </div>
+
+      <div class="legend-grid hidden" id="keyboardLegend"></div>
+
+      <select id="controlsSelect" class="hidden" aria-hidden="true" tabindex="-1">
+        <option value="current">Current controls</option>
+        <option value="all">All local controls</option>
+      </select>
+      <div class="controls-panel hidden" id="controlsPanel" aria-hidden="true"></div>
+      <span class="build-tag" id="buildTag" aria-hidden="true">v6</span>
+    </section>
 
     <template id="joystickTemplate">
       <div class="pad-card">
@@ -245,6 +246,6 @@
       </div>
     </template>
 
-    <script type="module" src="app.js"></script>
+    <script type="module" src="app.js?v=6"></script>
   </body>
 </html>

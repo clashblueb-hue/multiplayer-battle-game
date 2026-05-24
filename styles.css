@@ -380,18 +380,8 @@ body.game-active {
   background: #0c1320;
 }
 
-body.game-active .title-screen,
-body.game-active .setup-screen,
-body.game-active .status-bar,
-body.game-active .hud,
-body.game-active .hud-setup-only,
-body.game-active .legend-grid {
+body.game-active #menuShell {
   display: none !important;
-}
-
-body.game-active.offline-match .shell {
-  padding: 0;
-  max-width: none;
 }
 
 body.game-active .game-panel {
@@ -399,14 +389,15 @@ body.game-active .game-panel {
   position: fixed !important;
   inset: 0 !important;
   width: 100vw !important;
-  height: 100vh !important;
+  height: 100dvh !important;
+  min-height: 100vh !important;
   margin: 0 !important;
   padding: 0 !important;
-  background: transparent !important;
+  background: #0c1320 !important;
   border: none !important;
   box-shadow: none !important;
   overflow: hidden !important;
-  z-index: 1;
+  z-index: 1000;
 }
 
 body.game-active .canvas-container {
@@ -423,9 +414,10 @@ body.game-active canvas {
   width: 100% !important;
   height: 100% !important;
   max-height: none !important;
+  display: block;
 }
 
-body.game-active .mobile-controls {
+body.game-active .mobile-controls.is-active {
   inset: 0 !important;
   width: 100% !important;
   height: 100% !important;
@@ -598,11 +590,26 @@ canvas {
   inset: 0;
   width: 100%;
   height: 100%;
-  display: block !important;
+  display: none;
   padding: 0;
   margin: 0;
   pointer-events: none;
   z-index: 20;
+}
+
+body.game-active .mobile-controls.is-active {
+  display: block !important;
+}
+
+.build-tag {
+  position: fixed;
+  right: 8px;
+  bottom: 6px;
+  z-index: 45;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  letter-spacing: 0.08em;
 }
 
 .pad-card {
@@ -611,7 +618,7 @@ canvas {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: clamp(6px, 2vmin, 12px);
   padding: 0;
   background: transparent;
   border: none;
@@ -633,28 +640,23 @@ canvas {
 }
 
 .pad-card.corner-1 {
-  left: 12px;
-  bottom: 12px;
+  left: clamp(18px, 5vmin, 28px);
+  bottom: clamp(10px, 3vmin, 18px);
 }
 
 .pad-card.corner-2 {
-  right: 12px;
-  bottom: 12px;
+  right: clamp(10px, 3vmin, 18px);
+  bottom: clamp(10px, 3vmin, 18px);
 }
 
 .pad-card.corner-3 {
-  left: 12px;
-  top: 12px;
+  left: clamp(18px, 5vmin, 28px);
+  top: clamp(10px, 3vmin, 18px);
 }
 
 .pad-card.corner-4 {
-  right: 12px;
-  top: 12px;
-}
-
-body.game-active .pad-card.corner-1,
-body.game-active .pad-card.corner-3 {
-  left: 22px;
+  right: clamp(10px, 3vmin, 18px);
+  top: clamp(10px, 3vmin, 18px);
 }
 
 .pad-title {
@@ -663,8 +665,8 @@ body.game-active .pad-card.corner-3 {
 
 .stick-zone {
   position: relative;
-  width: 96px;
-  height: 96px;
+  width: clamp(76px, 22vmin, 112px);
+  height: clamp(76px, 22vmin, 112px);
   margin: 0;
   border: 2px solid rgba(255, 255, 255, 0.45);
   background: rgba(8, 14, 28, 0.12);
@@ -677,23 +679,23 @@ body.game-active .pad-card.corner-3 {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 38px;
-  height: 38px;
-  margin-left: -19px;
-  margin-top: -19px;
+  width: 36%;
+  height: 36%;
+  margin-left: -18%;
+  margin-top: -18%;
   background: rgba(127, 216, 255, 0.9);
   border: 2px solid rgba(196, 242, 255, 0.9);
   border-radius: 999px;
 }
 
 .attack-button {
-  width: 52px;
-  min-height: 52px;
+  width: clamp(46px, 14vmin, 58px);
+  min-height: clamp(46px, 14vmin, 58px);
   padding: 0;
   border: 2px solid rgba(255, 176, 176, 0.75);
   background: rgba(255, 120, 120, 0.2);
   color: #fff;
-  font-size: 1.35rem;
+  font-size: clamp(1rem, 4vmin, 1.35rem);
   line-height: 1;
   border-radius: 999px;
   box-shadow: none;

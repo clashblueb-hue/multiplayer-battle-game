@@ -1,4 +1,4 @@
-import { STEP_SECONDS, WORLD_WIDTH, SUMMIT_Y, cloneGameState, createGameState, stepGameState } from "./game-core.js";
+import { STEP_SECONDS, WORLD_WIDTH, SUMMIT_Y, GROUND_Y, SAFE_FALL_BUFFER, cloneGameState, createGameState, stepGameState } from "./game-core.js";
 import {
   CHARACTER_ROSTER,
   buildPlayerConfig,
@@ -75,6 +75,19 @@ const skinLabels = {
   camo: "Camo",
 };
 
+const APP_BUILD = "v6";
+
+const CAMERA = {
+  minViewWidth: 360,
+  maxViewWidth: WORLD_WIDTH - 20,
+  minViewHeight: 320,
+  maxViewHeight: 920,
+  paddingX: 110,
+  paddingY: 150,
+  closeViewWidth: 460,
+  smooth: 0.11,
+};
+
 const app = {
   screen: "title",
   mode: null,
@@ -86,7 +99,9 @@ const app = {
   selectedSkinId: "default",
   localSetup: createInitialLocalSetup(),
   state: null,
-  cameraY: 0,
+  cameraX: WORLD_WIDTH / 2,
+  cameraY: GROUND_Y - 320,
+  cameraScale: 1,
   roomCode: "Local",
   socket: null,
   socketReady: null,
@@ -103,6 +118,15 @@ const app = {
 init();
 
 function init() {
+  const buildTag = document.getElementById("buildTag");
+  if (buildTag) {
+    buildTag.textContent = APP_BUILD;
+  }
+
+  if (prefersTouchControls() || window.matchMedia("(max-width: 900px)").matches) {
+    app.deviceMode = "mobile";
+  }
+
   syncSelectionFromActiveSlot();
   renderRoster();
   renderSlotTabs();
@@ -115,6 +139,11 @@ function init() {
   updateNetworkBadge();
   updateScreen();
   setupEvents();
+  resizeGameCanvas();
+  window.addEventListener("resize", resizeGameCanvas);
+  window.addEventListener("orientationchange", () => {
+    window.setTimeout(resizeGameCanvas, 120);
+  });
   drawMenuCanvas();
   requestAnimationFrame(frame);
   registerOfflineSupport();
@@ -186,6 +215,151 @@ function updateScreen() {
   gamePanel.classList.toggle("hidden", !isGame);
   document.body.classList.toggle("game-active", isGame);
   document.body.classList.toggle("offline-match", isGame && app.mode === "offline");
+  if (isGame) {
+    resizeGameCanvas();
+  }
+}
+
+function resetCamera() {
+  app.cameraX = WORLD_WIDTH / 2;
+  app.cameraY = GROUND_Y - 320;
+  app.cameraScale = 1;
+  app._cameraReady = false;
+  resizeGameCanvas();
+}
+
+function resizeGameCanvas() {
+  const container = document.getElementById("gameStage");
+  if (!container || !canvas) {
+    return;
+  }
+
+  const rect = container.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) {
+    return;
+  }
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(320, Math.round(rect.width * dpr));
+  const height = Math.max(240, Math.round(rect.height * dpr));
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  canvas.style.width = `${rect.width}px`;
+  canvas.style.height = `${rect.height}px`;
+  context.imageSmoothingEnabled = false;
+
+  if (!app._cameraReady) {
+    app.cameraScale = width / CAMERA.closeViewWidth;
+  }
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function isPlayerFallingToDoom(player, state, averageY) {
+  if (player.eliminated || player.respawnTimer > 0) {
+    return false;
+  }
+
+  if (player.y > state.safeLevelY + SAFE_FALL_BUFFER * 0.35) {
+    return true;
+  }
+
+  if (player.y > state.safeLevelY + 140 && player.vy > 180) {
+    return true;
+  }
+
+  if (player.y > averageY + 280 && player.vy > 90) {
+    return true;
+  }
+
+  return false;
+}
+
+function updateCamera(state) {
+  resizeGameCanvas();
+
+  const active = state.players.filter((player) => !player.eliminated && player.respawnTimer <= 0);
+  if (active.length === 0) {
+    return;
+  }
+
+  const averageY = active.reduce((sum, player) => sum + player.y + player.h * 0.5, 0) / active.length;
+  const cameraTargets = active.filter((player) => !isPlayerFallingToDoom(player, state, averageY));
+  const targets = cameraTargets.length > 0 ? cameraTargets : active;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  targets.forEach((player) => {
+    minX = Math.min(minX, player.x);
+    maxX = Math.max(maxX, player.x + player.w);
+    minY = Math.min(minY, player.y);
+    maxY = Math.max(maxY, player.y + player.h);
+  });
+
+  const spreadX = Math.max(maxX - minX, 80);
+  const spreadY = Math.max(maxY - minY, 160);
+  const aspect = canvas.width / canvas.height;
+
+  let viewWidth = clamp(
+    spreadX + CAMERA.paddingX * 2,
+    active.length === 1 ? CAMERA.closeViewWidth * 0.82 : CAMERA.minViewWidth,
+    CAMERA.maxViewWidth,
+  );
+  let viewHeight = viewWidth / aspect;
+
+  const neededHeight = spreadY + CAMERA.paddingY * 2;
+  if (viewHeight < neededHeight) {
+    viewHeight = clamp(neededHeight, CAMERA.minViewHeight, CAMERA.maxViewHeight);
+    viewWidth = viewHeight * aspect;
+  }
+
+  if (active.length === 1 && spreadX < 180) {
+    viewWidth = CAMERA.closeViewWidth;
+    viewHeight = viewWidth / aspect;
+  }
+
+  const focusTop = Math.min(minY, ...targets.map((player) => player.y));
+  let centerX = (minX + maxX) / 2;
+  let centerY = (minY + maxY) / 2;
+  const climbAnchor = Math.min(state.safeLevelY - viewHeight * 0.38, focusTop + viewHeight * 0.12);
+
+  centerY = centerY * 0.45 + climbAnchor * 0.55;
+  centerY = clamp(centerY, focusTop - viewHeight * 0.18, state.safeLevelY - viewHeight * 0.22);
+  centerX = clamp(centerX, viewWidth * 0.5, WORLD_WIDTH - viewWidth * 0.5);
+
+  const targetScale = canvas.width / viewWidth;
+
+  if (!app._cameraReady) {
+    app.cameraX = centerX;
+    app.cameraY = centerY;
+    app.cameraScale = targetScale;
+    app._cameraReady = true;
+    return;
+  }
+
+  app.cameraX += (centerX - app.cameraX) * CAMERA.smooth;
+  app.cameraY += (centerY - app.cameraY) * CAMERA.smooth;
+  app.cameraScale += (targetScale - app.cameraScale) * CAMERA.smooth;
+}
+
+function applyWorldTransform() {
+  context.setTransform(
+    app.cameraScale,
+    0,
+    0,
+    app.cameraScale,
+    canvas.width * 0.5 - app.cameraX * app.cameraScale,
+    canvas.height * 0.5 - app.cameraY * app.cameraScale,
+  );
 }
 
 function renderRoster() {
@@ -355,7 +529,7 @@ function buildControlDisplays() {
       : app.mode === "online"
         ? [{ id: "local", name: "You" }]
         : [];
-  buildMobileControls(app.deviceMode === "mobile" ? playersForPads : []);
+  buildMobileControls(shouldUseMobilePads() ? playersForPads : []);
   renderControlsPanel();
 }
 
@@ -397,6 +571,18 @@ function prefersTouchControls() {
   return window.matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
 }
 
+function shouldUseMobilePads() {
+  if (app.screen !== "game") {
+    return app.deviceMode === "mobile";
+  }
+
+  if (app.mode === "offline") {
+    return app.deviceMode === "mobile" || prefersTouchControls();
+  }
+
+  return app.deviceMode === "mobile";
+}
+
 function startOfflineMatch() {
   if (prefersTouchControls()) {
     app.deviceMode = "mobile";
@@ -409,7 +595,7 @@ function startOfflineMatch() {
   app.state = createGameState("offline", players);
   app.roomCode = "Offline";
   app.selfId = "p1";
-  app.cameraY = 0;
+  resetCamera();
   app.paused = false;
   app.accumulator = 0;
   app.localInputs = Object.fromEntries(players.map((player) => [player.id, emptyInput()]));
@@ -529,7 +715,7 @@ function handleSocketMessage(message) {
       app.state = message.state;
       app.selfId = message.selfId;
       app.screen = "game";
-      app.cameraY = 0;
+      resetCamera();
       updateScreen();
       setPaused(false);
       buildControlDisplays();
@@ -643,11 +829,11 @@ function applyBindingInput(inputId, keys, code, isDown) {
 function buildMobileControls(players) {
   mobileControls.innerHTML = "";
   if (players.length === 0) {
-    mobileControls.classList.add("hidden");
+    mobileControls.classList.remove("is-active");
     return;
   }
 
-  mobileControls.classList.remove("hidden");
+  mobileControls.classList.add("is-active");
   mobileControls.style.position = "absolute";
   mobileControls.style.top = "0";
   mobileControls.style.left = "0";
@@ -911,6 +1097,7 @@ function resetPendingPresses() {
 }
 
 function renderGame() {
+  context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!app.state) {
@@ -919,18 +1106,20 @@ function renderGame() {
   }
 
   const state = app.state;
-  const livingPlayers = state.players.filter((player) => !player.eliminated);
-  const focusY = livingPlayers.length > 0 ? Math.min(...livingPlayers.map((player) => player.y)) : 0;
-  const targetCamera = Math.min(state.safeLevelY - 320, focusY - 220);
-  app.cameraY += (targetCamera - app.cameraY) * 0.08;
+  updateCamera(state);
+  drawGameBackgroundSky();
 
-  drawGameBackground(state);
+  context.save();
+  applyWorldTransform();
+  drawGameBackgroundWorld(state);
   drawPlatforms(state);
   drawItems(state);
   drawWeapons(state);
   drawProjectiles(state);
   drawPlayers(state);
   drawSummitGlow();
+  context.restore();
+
   drawHudOverlay(state);
   drawLiftCountdown(state);
   drawLevelTransition(state);
@@ -942,6 +1131,8 @@ function renderGame() {
 }
 
 function drawMenuCanvas() {
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  resizeGameCanvas();
   const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
   gradient.addColorStop(0, "#2d3f57");
   gradient.addColorStop(1, "#111826");
@@ -966,6 +1157,7 @@ function drawMenuCanvas() {
 }
 
 function drawWaitingScene() {
+  context.setTransform(1, 0, 0, 1, 0, 0);
   context.fillStyle = "#121926";
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.fillStyle = "#f8f9ff";
@@ -977,32 +1169,34 @@ function drawWaitingScene() {
   drawPosterCharacter(getCharacterWithSkin(app.localSetup[0].characterId, app.localSetup[0].skinId), 420, 470, 1.55);
 }
 
-function drawGameBackground(state) {
+function drawGameBackgroundSky() {
   const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
   gradient.addColorStop(0, "#465f83");
   gradient.addColorStop(1, "#111826");
   context.fillStyle = gradient;
   context.fillRect(0, 0, canvas.width, canvas.height);
+}
 
-  for (let index = 0; index < 10; index += 1) {
-    const y = ((index * 140 - app.cameraY * 0.22) % 760) - 60;
+function drawGameBackgroundWorld(state) {
+  for (let index = 0; index < 12; index += 1) {
+    const worldY = app.cameraY - 280 + index * 130;
     context.fillStyle = "rgba(255,255,255,0.05)";
-    context.fillRect(70 + index * 110, y, 50 + (index % 3) * 20, 22 + (index % 2) * 12);
+    context.fillRect(70 + index * 110, worldY, 50 + (index % 3) * 20, 22 + (index % 2) * 12);
   }
 
-  const lineY = worldToScreenY(state.safeLevelY + 30);
+  const lineY = state.safeLevelY + 30;
   context.fillStyle = "rgba(255, 120, 120, 0.35)";
-  for (let x = 0; x < canvas.width; x += 28) {
-    context.fillRect(x, lineY, 16, 4);
+  for (let worldX = 0; worldX < WORLD_WIDTH; worldX += 28) {
+    context.fillRect(worldX, lineY, 16, 4);
   }
 
   if (state.currentLevel === 1) {
     context.fillStyle = "rgba(22, 32, 47, 0.9)";
-    context.fillRect(0, worldToScreenY(830), 36, 180);
-    context.fillRect(canvas.width - 36, worldToScreenY(830), 36, 180);
+    context.fillRect(0, 830, 36, 180);
+    context.fillRect(WORLD_WIDTH - 36, 830, 36, 180);
     context.fillStyle = "rgba(255,255,255,0.08)";
-    context.fillRect(6, worldToScreenY(840), 24, 160);
-    context.fillRect(canvas.width - 30, worldToScreenY(840), 24, 160);
+    context.fillRect(6, 840, 24, 160);
+    context.fillRect(WORLD_WIDTH - 30, 840, 24, 160);
   }
 }
 
@@ -1019,9 +1213,9 @@ function drawPlatforms(state) {
   }
 
   colliders.forEach((platform) => {
-    const x = worldToScreenX(platform.x);
-    const y = worldToScreenY(platform.y);
-    const width = platform.w * screenScaleX();
+    const x = platform.x;
+    const y = platform.y;
+    const width = platform.w;
     const height = platform.h || 18;
     const fill = platform.isLift
       ? ["#f9d471", "#d88e2a"]
@@ -1065,8 +1259,8 @@ function drawItems(state) {
   }
 
   state.items.forEach((item) => {
-    const x = worldToScreenX(item.x);
-    const y = worldToScreenY(item.y);
+    const x = item.x;
+    const y = item.y;
     if (item.type === "xp") {
       context.fillStyle = "#f8c953";
       context.fillRect(x + 6, y, 8, 8);
@@ -1092,9 +1286,9 @@ function drawWeapons(state) {
     if (weapon.claimedBy) {
       return;
     }
-    const x = worldToScreenX(weapon.x);
-    const bob = Math.sin((state.elapsed + x) * 4) * 2;
-    const y = worldToScreenY(weapon.y) + bob;
+    const x = weapon.x;
+    const bob = Math.sin((state.elapsed + weapon.x) * 4) * 2;
+    const y = weapon.y + bob;
     if (weapon.kind === "sword") {
       context.fillStyle = "#d5ecff";
       context.fillRect(x + 11, y - 6, 4, 18);
@@ -1126,8 +1320,8 @@ function drawProjectiles(state) {
   }
 
   state.projectiles.forEach((projectile) => {
-    const x = worldToScreenX(projectile.x);
-    const y = worldToScreenY(projectile.y);
+    const x = projectile.x;
+    const y = projectile.y;
     context.fillStyle = projectile.color || "#ffe89b";
     context.fillRect(x - 10, y + 1, 10, 2);
     context.fillStyle = "#fff7d0";
@@ -1147,10 +1341,10 @@ function drawPlayers(state) {
       context.globalAlpha = 0.75;
     }
 
-    const x = worldToScreenX(player.x);
+    const x = player.x;
     const walkPhase = Math.sin(state.elapsed * 11 + player.x * 0.03) * Math.min(1, Math.abs(player.vx) / 180);
     const bob = player.onGround ? Math.abs(walkPhase) * 2 : 0;
-    const y = worldToScreenY(player.y) - bob;
+    const y = player.y - bob;
     const look = player.look || getFallbackCharacter().look;
     const centerX = x + player.w / 2;
     const lean = Math.max(-5, Math.min(5, player.vx * 0.012)) + (player.recoilTimer > 0 ? -player.facing * 2.4 : 0);
@@ -1278,13 +1472,13 @@ function drawPlayers(state) {
 }
 
 function drawSummitGlow() {
-  const summitY = worldToScreenY(SUMMIT_Y + 40);
+  const summitY = SUMMIT_Y + 40;
   const gradient = context.createLinearGradient(0, summitY - 60, 0, summitY + 60);
   gradient.addColorStop(0, "rgba(248, 201, 83, 0)");
   gradient.addColorStop(0.5, "rgba(248, 201, 83, 0.2)");
   gradient.addColorStop(1, "rgba(248, 201, 83, 0)");
   context.fillStyle = gradient;
-  context.fillRect(0, summitY - 60, canvas.width, 120);
+  context.fillRect(0, summitY - 60, WORLD_WIDTH, 120);
 }
 
 function drawHudOverlay(state) {
@@ -1292,16 +1486,25 @@ function drawHudOverlay(state) {
     return;
   }
 
+  const panelWidth = Math.min(520, canvas.width - 40);
+  const panelHeight = 150;
+  const panelX = (canvas.width - panelWidth) / 2;
+  const panelY = (canvas.height - panelHeight) / 2;
+
   context.fillStyle = "rgba(10, 14, 23, 0.88)";
-  context.fillRect(220, 220, 520, 150);
+  context.fillRect(panelX, panelY, panelWidth, panelHeight);
   context.strokeStyle = "rgba(255,255,255,0.12)";
-  context.strokeRect(220, 220, 520, 150);
+  context.strokeRect(panelX, panelY, panelWidth, panelHeight);
   context.fillStyle = "#f8f9ff";
-  context.font = "700 36px Impact, sans-serif";
-  context.fillText(`${state.winnerName} wins!`, 360, 286);
-  context.font = "18px Trebuchet MS, sans-serif";
+  context.font = `700 ${Math.round(canvas.width * 0.04)}px Impact, sans-serif`;
+  const winText = `${state.winnerName} wins!`;
+  const winWidth = context.measureText(winText).width;
+  context.fillText(winText, canvas.width / 2 - winWidth / 2, panelY + 66);
+  context.font = `${Math.round(canvas.width * 0.018)}px Trebuchet MS, sans-serif`;
   context.fillStyle = "#d0dcea";
-  context.fillText("Use the menu to review controls or go back to setup.", 282, 325);
+  const hint = "Use the menu to review controls or go back to setup.";
+  const hintWidth = context.measureText(hint).width;
+  context.fillText(hint, canvas.width / 2 - hintWidth / 2, panelY + 105);
 }
 
 function drawLiftCountdown(state) {
@@ -1309,18 +1512,20 @@ function drawLiftCountdown(state) {
     return;
   }
 
+  context.setTransform(1, 0, 0, 1, 0, 0);
   const countdown = Math.max(0, Math.ceil(state.liftEvent.countdown));
   const countdownText = String(countdown);
+  const boxSize = Math.max(56, Math.round(canvas.width * 0.12));
 
   if (app.mode === "offline") {
     context.fillStyle = "rgba(10, 14, 23, 0.55)";
-    context.fillRect(canvas.width / 2 - 34, 14, 68, 52);
+    context.fillRect(canvas.width / 2 - boxSize / 2, 14, boxSize, boxSize * 0.76);
     context.strokeStyle = "rgba(248, 201, 83, 0.45)";
-    context.strokeRect(canvas.width / 2 - 34, 14, 68, 52);
+    context.strokeRect(canvas.width / 2 - boxSize / 2, 14, boxSize, boxSize * 0.76);
     context.fillStyle = "#f8c953";
-    context.font = "700 42px Impact, sans-serif";
+    context.font = `700 ${Math.round(boxSize * 0.62)}px Impact, sans-serif`;
     const countdownWidth = context.measureText(countdownText).width;
-    context.fillText(countdownText, canvas.width / 2 - countdownWidth / 2, 50);
+    context.fillText(countdownText, canvas.width / 2 - countdownWidth / 2, 14 + boxSize * 0.58);
     return;
   }
 
@@ -1351,17 +1556,18 @@ function drawLevelTransition(state) {
     return;
   }
 
+  context.setTransform(1, 0, 0, 1, 0, 0);
   const progress = 1 - Math.max(0, state.levelTransition.timer / 2);
   const alpha = progress < 0.5 ? progress * 1.6 : (1 - progress) * 1.6;
   context.fillStyle = `rgba(6, 8, 12, ${Math.max(0.2, Math.min(0.9, alpha))})`;
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.fillStyle = "#f8f9ff";
-  context.font = "700 44px Impact, sans-serif";
+  context.font = `700 ${Math.round(canvas.width * 0.05)}px Impact, sans-serif`;
   const levelLabel = `Level ${state.levelTransition.nextLevel}`;
   const levelWidth = context.measureText(levelLabel).width;
   context.fillText(levelLabel, canvas.width / 2 - levelWidth / 2, canvas.height / 2 - 10);
   if (app.mode !== "offline") {
-    context.font = "18px Trebuchet MS, sans-serif";
+    context.font = `${Math.round(canvas.width * 0.018)}px Trebuchet MS, sans-serif`;
     context.fillStyle = "#d0dcea";
     context.fillText("The tower shifts into a new arena...", canvas.width / 2 - 140, canvas.height / 2 + 24);
   }
@@ -1372,6 +1578,7 @@ function drawPauseCurtain() {
     return;
   }
 
+  context.setTransform(1, 0, 0, 1, 0, 0);
   context.fillStyle = "rgba(10, 14, 23, 0.22)";
   context.fillRect(0, 0, canvas.width, canvas.height);
 }
@@ -1542,18 +1749,6 @@ function getPortraitEmblemMarkup(characterId, look) {
   }
 }
 
-function worldToScreenX(x) {
-  return x * screenScaleX();
-}
-
-function worldToScreenY(y) {
-  return y - app.cameraY;
-}
-
-function screenScaleX() {
-  return canvas.width / WORLD_WIDTH;
-}
-
 function emptyInput() {
   return {
     left: false,
@@ -1599,14 +1794,38 @@ function escapeHtml(text) {
     .replaceAll('"', "&quot;");
 }
 
+async function clearLegacyCaches() {
+  if (!("caches" in window)) {
+    return;
+  }
+
+  const keys = await caches.keys();
+  await Promise.all(keys.filter((key) => !key.includes("v6")).map((key) => caches.delete(key)));
+}
+
 async function registerOfflineSupport() {
   if (!("serviceWorker" in navigator)) {
     return;
   }
 
   try {
-    const swUrl = new URL("sw.js", import.meta.url);
-    await navigator.serviceWorker.register(swUrl.pathname);
+    await clearLegacyCaches();
+    const registration = await navigator.serviceWorker.register(`/sw.js?${APP_BUILD}`, { updateViaCache: "none" });
+
+    registration.addEventListener("updatefound", () => {
+      const worker = registration.installing;
+      if (!worker) {
+        return;
+      }
+
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "installed" && navigator.serviceWorker.controller) {
+          window.location.reload();
+        }
+      });
+    });
+
+    await registration.update();
   } catch (error) {
     statusText.textContent = "Offline caching could not be enabled in this browser.";
   }
