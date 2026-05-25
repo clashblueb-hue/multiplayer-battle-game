@@ -1,0 +1,20 @@
+/*
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/app.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/styles.css
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/game-core.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/roster.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate

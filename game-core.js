@@ -210,6 +210,8 @@ export function createGameState(mode, playerConfigs) {
     showdownEndsAt: 0,
     lastPlatformSide: 0,
     randomSeed: 19713,
+    roundWins: Object.fromEntries(playerConfigs.map((config) => [config.id, 0])),
+    roundBreak: null,
   };
   state.platforms = generateLevel(state, 1);
   return state;
@@ -276,9 +278,85 @@ function createPlayer(config, index) {
 // ============================================================
 // Main Step Function
 // ============================================================
+function buildScoreboardMessage(state) {
+  return state.players
+    .map((player) => `${player.name} ${state.roundWins[player.id] || 0}`)
+    .join("  ·  ");
+}
+
+function beginNextRound(state) {
+  if (!state.roundWins) {
+    state.roundWins = Object.fromEntries(state.players.map((player) => [player.id, 0]));
+  }
+
+  for (let index = 0; index < state.players.length; index += 1) {
+    const existing = state.players[index];
+    const fresh = createPlayer(
+      {
+        id: existing.id,
+        name: existing.name,
+        color: existing.color,
+        characterId: existing.characterId,
+        look: existing.look,
+        isBot: existing.isBot,
+      },
+      index,
+    );
+    Object.assign(existing, fresh);
+  }
+
+  state.elapsed = 0;
+  state.phase = "climb";
+  state.winnerId = null;
+  state.winnerName = null;
+  state.currentLevel = 1;
+  state.platforms = generateLevel(state, 1);
+  state.weapons = [];
+  state.items = [];
+  state.projectiles = [];
+  state.liftEvent = null;
+  state.levelTransition = { active: false, timer: 0, nextLevel: 2 };
+  state.safeLevelY = GROUND_Y;
+  state.checkpointY = GROUND_Y;
+  state.nextWeaponAt = 3.5;
+  state.nextLiftAt = 8;
+  state.showdownStarted = false;
+  state.showdownEndsAt = 0;
+  state.lastPlatformSide = 0;
+  state.roundBreak = { timer: 2.6, showScoreboard: true };
+  state.eventText = "New round!";
+  state.message = buildScoreboardMessage(state);
+}
+
 export function stepGameState(prevState, inputsById = {}, deltaSeconds = STEP_SECONDS) {
   const state = cloneGameState(prevState);
   state.elapsed += deltaSeconds;
+
+  if (state.phase === "finished") {
+    if (!state.roundBreak) {
+      state.roundBreak = { timer: 2.8, showScoreboard: false };
+    }
+    state.roundBreak.timer -= deltaSeconds;
+    state.eventText = `${state.winnerName || "Nobody"} wins the round!`;
+    state.message = `Next round in ${Math.max(1, Math.ceil(state.roundBreak.timer))}...`;
+    if (state.roundBreak.timer <= 0) {
+      beginNextRound(state);
+    }
+    return state;
+  }
+
+  if (state.roundBreak?.showScoreboard) {
+    state.roundBreak.timer -= deltaSeconds;
+    state.eventText = "New round";
+    state.message = buildScoreboardMessage(state);
+    if (state.roundBreak.timer <= 0) {
+      state.roundBreak = null;
+      state.eventText = "Climb to the summit.";
+      state.message = "Lv.1 — Fight!";
+    } else {
+      return state;
+    }
+  }
 
   // --- Level Transition Freeze ---
   if (state.levelTransition.active) {
@@ -343,10 +421,7 @@ export function stepGameState(prevState, inputsById = {}, deltaSeconds = STEP_SE
   maybeEndRound(state);
 
   // HUD text
-  if (state.phase === "finished") {
-    state.message = `${state.winnerName || "Nobody"} wins the round.`;
-    state.eventText = "Round finished";
-  } else if (state.phase === "showdown") {
+  if (state.phase === "showdown") {
     const timeLeft = Math.max(0, Math.ceil(state.showdownEndsAt - state.elapsed));
     state.eventText = `Showdown: ${timeLeft}s to knock everyone else off.`;
     state.message = "Weapons were reset. Grab one and finish the fight.";
@@ -1278,6 +1353,16 @@ function finishRound(state, winner) {
   state.phase = "finished";
   state.winnerId = winner?.id || null;
   state.winnerName = winner?.name || "Nobody";
+
+  if (!state.roundWins) {
+    state.roundWins = Object.fromEntries(state.players.map((player) => [player.id, 0]));
+  }
+
+  if (winner?.id) {
+    state.roundWins[winner.id] = (state.roundWins[winner.id] || 0) + 1;
+  }
+
+  state.roundBreak = { timer: 2.8, showScoreboard: false };
 }
 
 // ============================================================

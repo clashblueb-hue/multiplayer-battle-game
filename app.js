@@ -725,7 +725,10 @@ function handleSocketMessage(message) {
       app.state = cloneGameState(message.state);
       app.selfId = message.selfId;
       if (app.state.phase === "finished") {
-        statusText.textContent = `${app.state.winnerName} wins the round.`;
+        const countdown = Math.max(1, Math.ceil(app.state.roundBreak?.timer || 0));
+        statusText.textContent = `${app.state.winnerName} wins! Next round in ${countdown}s...`;
+      } else if (app.state.roundBreak?.showScoreboard) {
+        statusText.textContent = `New round — ${app.state.players.map((p) => `${p.name}: ${app.state.roundWins[p.id] || 0}`).join(" | ")}`;
       }
       break;
     case "error":
@@ -1107,6 +1110,12 @@ function renderGame() {
 
   const state = app.state;
   updateCamera(state);
+
+  if (state.roundBreak?.showScoreboard && app._lastScoreboardRound !== state.elapsed) {
+    app._lastScoreboardRound = state.elapsed;
+    resetCamera();
+  }
+
   drawGameBackgroundSky();
 
   context.save();
@@ -1120,7 +1129,9 @@ function renderGame() {
   drawSummitGlow();
   context.restore();
 
-  drawHudOverlay(state);
+  drawRoundWinnerSplash(state);
+  drawMatchScoreBanner(state);
+  drawPersistentRoundScores(state);
   drawLiftCountdown(state);
   drawLevelTransition(state);
   drawPauseCurtain();
@@ -1481,30 +1492,115 @@ function drawSummitGlow() {
   context.fillRect(0, summitY - 60, WORLD_WIDTH, 120);
 }
 
-function drawHudOverlay(state) {
+function drawRoundWinnerSplash(state) {
   if (state.phase !== "finished") {
     return;
   }
 
+  context.setTransform(1, 0, 0, 1, 0, 0);
   const panelWidth = Math.min(520, canvas.width - 40);
-  const panelHeight = 150;
+  const panelHeight = Math.min(200, canvas.height * 0.28);
   const panelX = (canvas.width - panelWidth) / 2;
   const panelY = (canvas.height - panelHeight) / 2;
 
-  context.fillStyle = "rgba(10, 14, 23, 0.88)";
+  context.fillStyle = "rgba(10, 14, 23, 0.9)";
   context.fillRect(panelX, panelY, panelWidth, panelHeight);
-  context.strokeStyle = "rgba(255,255,255,0.12)";
+  context.strokeStyle = "rgba(248, 201, 83, 0.55)";
+  context.lineWidth = 3;
   context.strokeRect(panelX, panelY, panelWidth, panelHeight);
-  context.fillStyle = "#f8f9ff";
-  context.font = `700 ${Math.round(canvas.width * 0.04)}px Impact, sans-serif`;
+
+  context.fillStyle = "#f8c953";
+  context.font = `700 ${Math.round(canvas.width * 0.045)}px Impact, sans-serif`;
   const winText = `${state.winnerName} wins!`;
   const winWidth = context.measureText(winText).width;
-  context.fillText(winText, canvas.width / 2 - winWidth / 2, panelY + 66);
-  context.font = `${Math.round(canvas.width * 0.018)}px Trebuchet MS, sans-serif`;
+  context.fillText(winText, canvas.width / 2 - winWidth / 2, panelY + panelHeight * 0.38);
+
+  const countdown = Math.max(1, Math.ceil(state.roundBreak?.timer || 0));
+  context.font = `${Math.round(canvas.width * 0.022)}px Trebuchet MS, sans-serif`;
   context.fillStyle = "#d0dcea";
-  const hint = "Use the menu to review controls or go back to setup.";
-  const hintWidth = context.measureText(hint).width;
-  context.fillText(hint, canvas.width / 2 - hintWidth / 2, panelY + 105);
+  const nextText = `Next round in ${countdown}...`;
+  const nextWidth = context.measureText(nextText).width;
+  context.fillText(nextText, canvas.width / 2 - nextWidth / 2, panelY + panelHeight * 0.68);
+}
+
+function drawMatchScoreBanner(state) {
+  if (!state.roundBreak?.showScoreboard) {
+    return;
+  }
+
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.fillStyle = "rgba(6, 10, 18, 0.72)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  const title = "Round wins";
+  context.fillStyle = "#f8f9ff";
+  context.font = `700 ${Math.round(canvas.width * 0.05)}px Impact, sans-serif`;
+  const titleWidth = context.measureText(title).width;
+  context.fillText(title, canvas.width / 2 - titleWidth / 2, canvas.height * 0.22);
+
+  const rowHeight = Math.max(52, canvas.height * 0.09);
+  const startY = canvas.height * 0.32;
+  const sortedPlayers = [...state.players].sort(
+    (a, b) => (state.roundWins[b.id] || 0) - (state.roundWins[a.id] || 0),
+  );
+
+  sortedPlayers.forEach((player, index) => {
+    const wins = state.roundWins[player.id] || 0;
+    const rowY = startY + index * rowHeight;
+    const cardWidth = Math.min(420, canvas.width - 48);
+    const cardX = (canvas.width - cardWidth) / 2;
+
+    context.fillStyle = "rgba(12, 23, 58, 0.92)";
+    context.fillRect(cardX, rowY, cardWidth, rowHeight - 8);
+    context.strokeStyle = player.color || "#84d8ff";
+    context.lineWidth = 3;
+    context.strokeRect(cardX, rowY, cardWidth, rowHeight - 8);
+
+    context.fillStyle = player.color || "#eef4ff";
+    context.fillRect(cardX + 14, rowY + 14, 18, 18);
+
+    context.fillStyle = "#f8f9ff";
+    context.font = `700 ${Math.round(canvas.width * 0.028)}px Impact, sans-serif`;
+    context.fillText(player.name, cardX + 42, rowY + rowHeight * 0.42);
+
+    context.fillStyle = "#f8c953";
+    context.font = `700 ${Math.round(canvas.width * 0.04)}px Impact, sans-serif`;
+    const winLabel = String(wins);
+    const winWidth = context.measureText(winLabel).width;
+    context.fillText(winLabel, cardX + cardWidth - winWidth - 20, rowY + rowHeight * 0.44);
+  });
+}
+
+function drawPersistentRoundScores(state) {
+  if (!state.roundWins || state.phase === "finished" || state.roundBreak?.showScoreboard) {
+    return;
+  }
+
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  const pad = 10;
+  const boxHeight = 28 + state.players.length * 22;
+  const boxWidth = Math.min(200, canvas.width * 0.34);
+
+  context.fillStyle = "rgba(10, 14, 23, 0.55)";
+  context.fillRect(pad, pad, boxWidth, boxHeight);
+  context.strokeStyle = "rgba(255,255,255,0.12)";
+  context.strokeRect(pad, pad, boxWidth, boxHeight);
+
+  context.fillStyle = "#c3d2e5";
+  context.font = `700 ${Math.max(11, Math.round(canvas.width * 0.014))}px Trebuchet MS, sans-serif`;
+  context.fillText("Wins", pad + 10, pad + 18);
+
+  state.players.forEach((player, index) => {
+    const wins = state.roundWins[player.id] || 0;
+    const rowY = pad + 34 + index * 22;
+    context.fillStyle = player.color || "#eef4ff";
+    context.fillRect(pad + 10, rowY - 10, 8, 8);
+    context.fillStyle = "#f8f9ff";
+    context.font = `${Math.max(11, Math.round(canvas.width * 0.013))}px Trebuchet MS, sans-serif`;
+    context.fillText(`${player.name}`, pad + 24, rowY);
+    context.fillStyle = "#f8c953";
+    context.fillText(String(wins), pad + boxWidth - 24, rowY);
+  });
 }
 
 function drawLiftCountdown(state) {
